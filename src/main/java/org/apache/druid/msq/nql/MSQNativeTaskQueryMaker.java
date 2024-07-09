@@ -25,8 +25,6 @@ import com.google.common.base.Preconditions;
 import org.apache.druid.common.guava.FutureUtils;
 import org.apache.druid.error.DruidException;
 import org.apache.druid.error.InvalidInput;
-import org.apache.druid.java.util.common.Intervals;
-import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.java.util.common.granularity.Granularity;
 import org.apache.druid.java.util.common.guava.Sequences;
@@ -35,13 +33,11 @@ import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.indexing.MSQTuningConfig;
 import org.apache.druid.msq.indexing.destination.DataSourceMSQDestination;
-import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
 import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
-import org.apache.druid.msq.indexing.destination.MSQSelectDestination;
-import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
 import org.apache.druid.msq.sql.MSQMode;
 import org.apache.druid.msq.util.MultiStageQueryContext;
+import org.apache.druid.msq.util.TaskQueryMakerUtil;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.QueryContexts;
@@ -51,7 +47,6 @@ import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.server.QueryResponse;
 import org.apache.druid.sql.calcite.parser.DruidSqlIngest;
 import org.apache.druid.sql.calcite.parser.DruidSqlInsert;
-import org.apache.druid.sql.calcite.parser.DruidSqlReplace;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
 import org.apache.druid.sql.destination.ExportDestination;
 import org.apache.druid.sql.destination.IngestDestination;
@@ -60,14 +55,11 @@ import org.apache.druid.sql.http.ResultFormat;
 import org.joda.time.Interval;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 public class MSQNativeTaskQueryMaker
 {
@@ -138,25 +130,7 @@ public class MSQNativeTaskQueryMaker
     final IndexSpec indexSpec = MultiStageQueryContext.getIndexSpec(queryContext, jsonMapper);
     final boolean finalizeAggregations = MultiStageQueryContext.isFinalizeAggregations(queryContext);
 
-    final List<Interval> replaceTimeChunks =
-        Optional.ofNullable(queryContext.get(DruidSqlReplace.SQL_REPLACE_TIME_CHUNKS))
-                .map(
-                    s -> {
-                      if (s instanceof String && "all".equals(StringUtils.toLowerCase((String) s))) {
-                        return Intervals.ONLY_ETERNITY;
-                      } else {
-                        final String[] parts = ((String) s).split("\\s*,\\s*");
-                        final List<Interval> intervals = new ArrayList<>();
-
-                        for (final String part : parts) {
-                          intervals.add(Intervals.of(part));
-                        }
-
-                        return intervals;
-                      }
-                    }
-                )
-                .orElse(null);
+    final List<Interval> replaceTimeChunks = TaskQueryMakerUtil.replaceTimeChunks(queryContext);
 
     final MSQDestination destination;
 
@@ -198,21 +172,7 @@ public class MSQNativeTaskQueryMaker
       );
       destination = dataSourceMSQDestination;
     } else {
-      final MSQSelectDestination msqSelectDestination = MultiStageQueryContext.getSelectDestination(queryContext);
-      if (msqSelectDestination.equals(MSQSelectDestination.TASKREPORT)) {
-        destination = TaskReportMSQDestination.instance();
-      } else if (msqSelectDestination.equals(MSQSelectDestination.DURABLESTORAGE)) {
-        destination = DurableStorageMSQDestination.instance();
-      } else {
-        throw InvalidInput.exception(
-            "Unsupported select destination [%s] provided in the query context. MSQ can currently write the select results to "
-            + "[%s]",
-            msqSelectDestination.getName(),
-            Arrays.stream(MSQSelectDestination.values())
-                  .map(MSQSelectDestination::getName)
-                  .collect(Collectors.joining(","))
-        );
-      }
+      destination = TaskQueryMakerUtil.selectDestination(queryContext);
     }
     final Map<String, Object> nativeQueryContextOverrides = new HashMap<>();
 

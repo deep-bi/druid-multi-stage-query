@@ -20,20 +20,15 @@
 package org.apache.druid.msq.exec;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
-import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.druid.error.DruidException;
 import org.apache.druid.frame.allocation.ArenaMemoryAllocator;
-import org.apache.druid.frame.channel.FrameChannelSequence;
-import org.apache.druid.frame.key.ClusterBy;
 import org.apache.druid.frame.processor.FrameProcessorExecutor;
 import org.apache.druid.indexer.TaskState;
 import org.apache.druid.indexer.TaskStatus;
-import org.apache.druid.indexing.common.TaskReport;
 import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.Pair;
@@ -59,14 +54,10 @@ import org.apache.druid.msq.indexing.error.CannotParseExternalDataFault;
 import org.apache.druid.msq.indexing.error.FaultsExceededChecker;
 import org.apache.druid.msq.indexing.error.MSQErrorReport;
 import org.apache.druid.msq.indexing.error.MSQException;
-import org.apache.druid.msq.indexing.error.MSQFaultUtils;
 import org.apache.druid.msq.indexing.error.MSQWarnings;
 import org.apache.druid.msq.indexing.error.QueryNotSupportedFault;
 import org.apache.druid.msq.indexing.error.UnknownFault;
 import org.apache.druid.msq.indexing.report.MSQResultsReport;
-import org.apache.druid.msq.indexing.report.MSQStagesReport;
-import org.apache.druid.msq.indexing.report.MSQTaskReport;
-import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.input.InputSpecSlicerFactory;
 import org.apache.druid.msq.input.stage.InputChannels;
 import org.apache.druid.msq.input.stage.StageInputSpec;
@@ -74,37 +65,29 @@ import org.apache.druid.msq.kernel.QueryDefinition;
 import org.apache.druid.msq.kernel.QueryDefinitionBuilder;
 import org.apache.druid.msq.kernel.StageDefinition;
 import org.apache.druid.msq.kernel.StageId;
-import org.apache.druid.msq.kernel.StagePartition;
 import org.apache.druid.msq.kernel.controller.ControllerQueryKernel;
-import org.apache.druid.msq.kernel.controller.ControllerStagePhase;
 import org.apache.druid.msq.querykit.QueryKit;
 import org.apache.druid.msq.querykit.ShuffleSpecFactory;
 import org.apache.druid.msq.querykit.results.ExportResultsFrameProcessorFactory;
-import org.apache.druid.msq.querykit.results.QueryResultFrameProcessorFactory;
 import org.apache.druid.msq.shuffle.input.DurableStorageInputChannelFactory;
 import org.apache.druid.msq.shuffle.input.WorkerInputChannelFactory;
+import org.apache.druid.msq.util.ControllerUtil;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.msq.util.NativeStatementResourceHelper;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
-import org.apache.druid.segment.column.RowSignature;
-import org.apache.druid.sql.calcite.planner.ColumnMapping;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
 import org.apache.druid.sql.http.ResultFormat;
 import org.apache.druid.storage.ExportStorageProvider;
-import org.joda.time.Interval;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 public class NativeControllerImpl extends AbstractController<MSQNativeControllerTask>
 {
@@ -123,30 +106,6 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
     ));
   }
 
-  static ClusterStatisticsMergeMode finalizeClusterStatisticsMergeMode(
-      StageDefinition stageDef,
-      ClusterStatisticsMergeMode initialMode
-  )
-  {
-    ClusterStatisticsMergeMode mergeMode = initialMode;
-    if (initialMode == ClusterStatisticsMergeMode.AUTO) {
-      ClusterBy clusterBy = stageDef.getClusterBy();
-      if (clusterBy.getBucketByCount() == 0) {
-        // If there is no time clustering, there is no scope for sequential merge
-        mergeMode = ClusterStatisticsMergeMode.PARALLEL;
-      } else if (stageDef.getMaxWorkerCount() > Limits.MAX_WORKERS_FOR_PARALLEL_MERGE) {
-        mergeMode = ClusterStatisticsMergeMode.SEQUENTIAL;
-      } else {
-        mergeMode = ClusterStatisticsMergeMode.PARALLEL;
-      }
-      log.info(
-          "Stage [%d] AUTO mode: chose %s mode to merge key statistics",
-          stageDef.getStageNumber(),
-          mergeMode
-      );
-    }
-    return mergeMode;
-  }
 
   private static boolean isInlineResults(final MSQSpec querySpec)
   {
@@ -233,55 +192,12 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
       return builder.build();
     } else if (querySpec.getDestination() instanceof DurableStorageMSQDestination) {
 
-      // attaching new query results stage if the final stage does sort during shuffle so that results are ordered.
-      StageDefinition finalShuffleStageDef = queryDef.getFinalStageDefinition();
-      if (finalShuffleStageDef.doesSortDuringShuffle()) {
-        final QueryDefinitionBuilder builder = QueryDefinition.builder();
-        builder.addAll(queryDef);
-        builder.add(StageDefinition.builder(queryDef.getNextStageNumber())
-                                   .inputs(new StageInputSpec(queryDef.getFinalStageDefinition().getStageNumber()))
-                                   .maxWorkerCount(tuningConfig.getMaxNumWorkers())
-                                   .signature(finalShuffleStageDef.getSignature())
-                                   .shuffleSpec(null)
-                                   .processorFactory(new QueryResultFrameProcessorFactory())
-        );
-        return builder.build();
-      } else {
-        return queryDef;
-      }
+      return ControllerUtil.queryDefinitionForDurableStorage(queryDef, tuningConfig);
     } else if (querySpec.getDestination() instanceof TaskReportMSQDestination) {
       return queryDef;
     } else {
       throw new ISE("Unsupported destination [%s]", querySpec.getDestination());
     }
-  }
-
-  private static MSQResultsReport makeResultsTaskReport(
-      final QueryDefinition queryDef,
-      final Yielder<Object[]> resultsYielder,
-      final ColumnMappings columnMappings,
-      @Nullable final List<SqlTypeName> sqlTypeNames,
-      final MSQSelectDestination selectDestination
-  )
-  {
-    final RowSignature querySignature = queryDef.getFinalStageDefinition().getSignature();
-    final ImmutableList.Builder<MSQResultsReport.ColumnAndType> mappedSignature = ImmutableList.builder();
-
-    for (final ColumnMapping mapping : columnMappings.getMappings()) {
-      mappedSignature.add(
-          new MSQResultsReport.ColumnAndType(
-              mapping.getOutputColumn(),
-              querySignature.getColumnType(mapping.getQueryColumn()).orElse(null)
-          )
-      );
-    }
-
-    return MSQResultsReport.createReportAndLimitRowsIfNeeded(
-        mappedSignature.build(),
-        sqlTypeNames,
-        resultsYielder,
-        selectDestination
-    );
   }
 
   @Nullable
@@ -324,26 +240,8 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
       );
 
       return Yielders.each(
-          Sequences.concat(
-                       StreamSupport.stream(queryKernel.getResultPartitionsForStage(finalStageId).spliterator(), false)
-                                    .map(
-                                        readablePartition -> {
-                                          try {
-                                            return new FrameChannelSequence(
-                                                inputChannels.openChannel(
-                                                    new StagePartition(
-                                                        queryKernel.getStageDefinition(finalStageId).getId(),
-                                                        readablePartition.getPartitionNumber()
-                                                    )
-                                                )
-                                            );
-                                          }
-                                          catch (IOException e) {
-                                            throw new RuntimeException(e);
-                                          }
-                                        }
-                                    ).collect(Collectors.toList())
-                   ).flatMap(
+          Sequences.concat(ControllerUtil.createFrameChannelSequences(queryKernel, inputChannels, finalStageId).collect(
+                       Collectors.toList())).flatMap(
                        frame ->
                            NativeStatementResourceHelper.getResultSequence(
                                queryDef.getFinalStageDefinition(),
@@ -439,7 +337,7 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
       // If successful, encourage the tasks to exit successfully.
       // get results before posting finish to the tasks.
       if (resultsYielder != null) {
-        resultsReport = makeResultsTaskReport(
+        resultsReport = ControllerUtil.makeResultsTaskReport(
             queryDef,
             resultsYielder,
             task.getQuerySpec().getColumnMappings(),
@@ -479,86 +377,15 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
                                                                                            .getQuery()
                                                                                            .context());
 
-    try {
-      releaseTaskLocks();
-      cleanUpDurableStorageIfNeeded();
-
-      if (queryKernel != null && queryKernel.isSuccess()) {
-        if (shouldWaitForSegmentLoad && segmentLoadWaiter != null) {
-          // If successful, there are segments created and segment load is enabled, segmentLoadWaiter should wait
-          // for them to become available.
-          log.info("Controller will now wait for segments to be loaded. The query has already finished executing,"
-                   + " and results will be included once the segments are loaded, even if this query is cancelled now.");
-          segmentLoadWaiter.waitForSegmentsToLoad();
-        }
-      }
-      stopExternalFetchers();
-    }
-    catch (Exception e) {
-      log.warn(e, "Exception thrown during cleanup. Ignoring it and writing task report.");
-    }
-
-    try {
-      // Write report even if something went wrong.
-      final MSQStagesReport stagesReport;
-
-      if (queryDef != null) {
-        final Map<Integer, ControllerStagePhase> stagePhaseMap;
-
-        if (queryKernel != null) {
-          // Once the query finishes, cleanup would have happened for all the stages that were successful
-          // Therefore we mark it as done to make the reports prettier and more accurate
-          queryKernel.markSuccessfulTerminalStagesAsFinished();
-          stagePhaseMap = queryKernel.getActiveStages()
-                                     .stream()
-                                     .collect(
-                                         Collectors.toMap(StageId::getStageNumber, queryKernel::getStagePhase)
-                                     );
-        } else {
-          stagePhaseMap = Collections.emptyMap();
-        }
-
-        stagesReport = makeStageReport(
-            queryDef,
-            stagePhaseMap,
-            stageRuntimesForLiveReports,
-            stageWorkerCountsForLiveReports,
-            stagePartitionCountsForLiveReports
-        );
-      } else {
-        stagesReport = null;
-      }
-
-      final MSQTaskReportPayload taskReportPayload = new MSQTaskReportPayload(
-          makeStatusReport(
-              taskStateForReport,
-              errorForReport,
-              workerWarnings,
-              queryStartTime,
-              new Interval(queryStartTime, DateTimes.nowUtc()).toDurationMillis(),
-              workerTaskLauncher,
-              segmentLoadWaiter
-          ),
-          stagesReport,
-          countersSnapshot,
-          resultsReport
-      );
-
-      context.writeReports(
-          id(),
-          TaskReport.buildTaskReports(new MSQTaskReport(id(), taskReportPayload))
-      );
-    }
-    catch (Throwable e) {
-      log.warn(e, "Error encountered while writing task report. Skipping.");
-    }
-
-    if (taskStateForReport == TaskState.SUCCESS) {
-      return TaskStatus.success(id());
-    } else {
-      // errorForReport is nonnull when taskStateForReport != SUCCESS. Use that message.
-      return TaskStatus.failure(id(), MSQFaultUtils.generateMessageWithErrorCode(errorForReport.getFault()));
-    }
+    return finalizeTaskRunning(
+        queryKernel,
+        shouldWaitForSegmentLoad,
+        queryDef,
+        taskStateForReport,
+        errorForReport,
+        countersSnapshot,
+        resultsReport
+    );
   }
 
   private QueryDefinition initializeQueryDefAndState(final Closer closer)
@@ -638,9 +465,7 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
         context,
         (failedTask, fault) -> {
           if (isFaultToleranceEnabled && ControllerQueryKernel.isRetriableFault(fault)) {
-            addToKernelManipulationQueue((kernel) -> {
-              addToRetryQueue(kernel, failedTask.getWorkerNumber(), fault);
-            });
+            addToKernelManipulationQueue((kernel) -> addToRetryQueue(kernel, failedTask.getWorkerNumber(), fault));
           } else {
             throw new MSQException(fault);
           }
@@ -659,7 +484,7 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
         stageDefinition ->
             stageToStatsMergingMode.put(
                 stageDefinition.getId().getStageNumber(),
-                finalizeClusterStatisticsMergeMode(
+                ControllerUtil.finalizeClusterStatisticsMergeMode(
                     stageDefinition,
                     MultiStageQueryContext.getClusterStatisticsMergeMode(queryContext)
                 )

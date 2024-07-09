@@ -28,6 +28,7 @@ import org.apache.druid.msq.indexing.error.InsertLockPreemptedFault;
 import org.apache.druid.msq.indexing.error.MSQException;
 import org.apache.druid.msq.kernel.StageDefinition;
 import org.apache.druid.msq.kernel.StageId;
+import org.apache.druid.msq.util.ControllerUtil;
 import org.easymock.EasyMock;
 import org.junit.After;
 import org.junit.Assert;
@@ -140,7 +141,7 @@ public class ControllerImplTest
 
     Assert.assertEquals(
         ClusterStatisticsMergeMode.PARALLEL,
-        ControllerImpl.finalizeClusterStatisticsMergeMode(
+        ControllerUtil.finalizeClusterStatisticsMergeMode(
             stageDefinition,
             ClusterStatisticsMergeMode.AUTO
         )
@@ -160,7 +161,7 @@ public class ControllerImplTest
 
     Assert.assertEquals(
         ClusterStatisticsMergeMode.PARALLEL,
-        ControllerImpl.finalizeClusterStatisticsMergeMode(
+        ControllerUtil.finalizeClusterStatisticsMergeMode(
             stageDefinition,
             ClusterStatisticsMergeMode.AUTO
         )
@@ -179,7 +180,7 @@ public class ControllerImplTest
 
     Assert.assertEquals(
         ClusterStatisticsMergeMode.SEQUENTIAL,
-        ControllerImpl.finalizeClusterStatisticsMergeMode(
+        ControllerUtil.finalizeClusterStatisticsMergeMode(
             stageDefinition,
             ClusterStatisticsMergeMode.AUTO
         )
@@ -193,11 +194,11 @@ public class ControllerImplTest
 
     Assert.assertEquals(
         ClusterStatisticsMergeMode.SEQUENTIAL,
-        ControllerImpl.finalizeClusterStatisticsMergeMode(null, ClusterStatisticsMergeMode.SEQUENTIAL)
+        ControllerUtil.finalizeClusterStatisticsMergeMode(null, ClusterStatisticsMergeMode.SEQUENTIAL)
     );
     Assert.assertEquals(
         ClusterStatisticsMergeMode.PARALLEL,
-        ControllerImpl.finalizeClusterStatisticsMergeMode(null, ClusterStatisticsMergeMode.PARALLEL)
+        ControllerUtil.finalizeClusterStatisticsMergeMode(null, ClusterStatisticsMergeMode.PARALLEL)
     );
   }
 

@@ -39,6 +39,7 @@ import it.unimi.dsi.fastutil.ints.IntSet;
 import org.apache.druid.client.ImmutableSegmentLoadInfo;
 import org.apache.druid.common.guava.FutureUtils;
 import org.apache.druid.data.input.StringTuple;
+import org.apache.druid.discovery.BrokerClient;
 import org.apache.druid.frame.key.ClusterBy;
 import org.apache.druid.frame.key.ClusterByPartition;
 import org.apache.druid.frame.key.ClusterByPartitions;
@@ -87,11 +88,13 @@ import org.apache.druid.msq.indexing.error.InvalidNullByteFault;
 import org.apache.druid.msq.indexing.error.MSQErrorReport;
 import org.apache.druid.msq.indexing.error.MSQException;
 import org.apache.druid.msq.indexing.error.MSQFault;
+import org.apache.druid.msq.indexing.error.MSQFaultUtils;
 import org.apache.druid.msq.indexing.error.MSQWarningReportLimiterPublisher;
 import org.apache.druid.msq.indexing.error.TooManyWarningsFault;
 import org.apache.druid.msq.indexing.error.UnknownFault;
 import org.apache.druid.msq.indexing.error.WorkerRpcFailedFault;
 import org.apache.druid.msq.indexing.processor.SegmentGeneratorFrameProcessorFactory;
+import org.apache.druid.msq.indexing.report.MSQResultsReport;
 import org.apache.druid.msq.indexing.report.MSQStagesReport;
 import org.apache.druid.msq.indexing.report.MSQStatusReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReport;
@@ -1002,6 +1005,110 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
     catch (IOException e) {
       throw new IOException("Failed to release locks", e);
     }
+  }
+
+  protected TaskStatus finalizeTaskRunning(
+      final ControllerQueryKernel queryKernel,
+      final boolean shouldWaitForSegmentLoad,
+      final QueryDefinition queryDef,
+      final TaskState taskStateForReport,
+      final MSQErrorReport errorForReport,
+      final CounterSnapshotsTree countersSnapshot,
+      final MSQResultsReport resultsReport
+  )
+  {
+    try {
+      releaseTaskLocks();
+      cleanUpDurableStorageIfNeeded();
+
+      if (queryKernel != null && queryKernel.isSuccess()) {
+        if (shouldWaitForSegmentLoad && segmentLoadWaiter != null) {
+          // If successful, there are segments created and segment load is enabled, segmentLoadWaiter should wait
+          // for them to become available.
+          log.info("Controller will now wait for segments to be loaded. The query has already finished executing,"
+                   + " and results will be included once the segments are loaded, even if this query is cancelled now.");
+          segmentLoadWaiter.waitForSegmentsToLoad();
+        }
+      }
+      stopExternalFetchers();
+    }
+    catch (Exception e) {
+      log.warn(e, "Exception thrown during cleanup. Ignoring it and writing task report.");
+    }
+
+    try {
+      // Write report even if something went wrong.
+      final MSQStagesReport stagesReport;
+
+      if (queryDef != null) {
+        final Map<Integer, ControllerStagePhase> stagePhaseMap;
+
+        if (queryKernel != null) {
+          // Once the query finishes, cleanup would have happened for all the stages that were successful
+          // Therefore we mark it as done to make the reports prettier and more accurate
+          queryKernel.markSuccessfulTerminalStagesAsFinished();
+          stagePhaseMap = queryKernel.getActiveStages()
+                                     .stream()
+                                     .collect(
+                                         Collectors.toMap(StageId::getStageNumber, queryKernel::getStagePhase)
+                                     );
+        } else {
+          stagePhaseMap = Collections.emptyMap();
+        }
+
+        stagesReport = makeStageReport(
+            queryDef,
+            stagePhaseMap,
+            stageRuntimesForLiveReports,
+            stageWorkerCountsForLiveReports,
+            stagePartitionCountsForLiveReports
+        );
+      } else {
+        stagesReport = null;
+      }
+
+      final MSQTaskReportPayload taskReportPayload = new MSQTaskReportPayload(
+          makeStatusReport(
+              taskStateForReport,
+              errorForReport,
+              workerWarnings,
+              queryStartTime,
+              new Interval(queryStartTime, DateTimes.nowUtc()).toDurationMillis(),
+              workerTaskLauncher,
+              segmentLoadWaiter
+          ),
+          stagesReport,
+          countersSnapshot,
+          resultsReport
+      );
+
+      context.writeReports(
+          id(),
+          TaskReport.buildTaskReports(new MSQTaskReport(id(), taskReportPayload))
+      );
+    }
+    catch (Throwable e) {
+      log.warn(e, "Error encountered while writing task report. Skipping.");
+    }
+
+    if (taskStateForReport == TaskState.SUCCESS) {
+      return TaskStatus.success(id());
+    } else {
+      // errorForReport is nonnull when taskStateForReport != SUCCESS. Use that message.
+      return TaskStatus.failure(id(), MSQFaultUtils.generateMessageWithErrorCode(errorForReport.getFault()));
+    }
+  }
+
+  protected void initLoadWaiter(final Set<DataSegment> segmentsWithTombstones)
+  {
+    segmentLoadWaiter = new SegmentLoadStatusFetcher(
+        context.injector().getInstance(BrokerClient.class),
+        context.jsonMapper(),
+        task.getId(),
+        task.getDataSource(),
+        segmentsWithTombstones,
+        true
+    );
   }
 
   @SuppressWarnings({"unchecked", "rawtypes"})
