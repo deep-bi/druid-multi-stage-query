@@ -125,7 +125,7 @@ public class CalciteSelectJoinQueryMSQTest
     {
       final WorkerMemoryParameters workerMemoryParameters =
           WorkerMemoryParameters.createInstance(WorkerMemoryParameters.PROCESSING_MINIMUM_BYTES * 50, 2, 10, 2, 0, 0);
-      final MSQTestOverlordServiceClient indexingServiceClient = new MSQTestOverlordServiceClient(
+      final MSQSQLTestOverlordServiceClient indexingServiceClient = new MSQSQLTestOverlordServiceClient(
           queryJsonMapper,
           injector,
           new MSQTestTaskActionClient(queryJsonMapper, injector),
@@ -156,7 +156,7 @@ public class CalciteSelectJoinQueryMSQTest
       return new QueryTestBuilder(new CalciteTestConfig(true))
           .addCustomRunner(
               new ExtractResultsFactory(
-                  () -> (MSQTestOverlordServiceClient) ((MSQTaskSqlEngine) queryFramework().engine()).overlordClient()))
+                  () -> (MSQSQLTestOverlordServiceClient) ((MSQTaskSqlEngine) queryFramework().engine()).overlordClient()))
           .skipVectorize(true)
           .msqCompatible(msqCompatible);
     }

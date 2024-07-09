@@ -36,7 +36,7 @@ import java.util.function.Supplier;
  */
 public class ExtractResultsFactory implements QueryTestRunner.QueryRunStepFactory
 {
-  private final Supplier<MSQTestOverlordServiceClient> overlordClientSupplier;
+  private final Supplier<MSQSQLTestOverlordServiceClient> overlordClientSupplier;
 
   /**
    * @param overlordClientSupplier Supplier to the overlord client which contains the reports for the test run. A
@@ -44,7 +44,7 @@ public class ExtractResultsFactory implements QueryTestRunner.QueryRunStepFactor
    *                               not be instantiated however when we fetch the results, the overlord client must be
    *                               instantiated by the query framework
    */
-  public ExtractResultsFactory(Supplier<MSQTestOverlordServiceClient> overlordClientSupplier)
+  public ExtractResultsFactory(Supplier<MSQSQLTestOverlordServiceClient> overlordClientSupplier)
   {
     this.overlordClientSupplier = overlordClientSupplier;
   }
@@ -56,7 +56,7 @@ public class ExtractResultsFactory implements QueryTestRunner.QueryRunStepFactor
     {
       final List<QueryTestRunner.QueryResults> extractedResults = new ArrayList<>();
 
-      final MSQTestOverlordServiceClient overlordClient = overlordClientSupplier.get();
+      final MSQSQLTestOverlordServiceClient overlordClient = overlordClientSupplier.get();
 
       @Override
       public void run()

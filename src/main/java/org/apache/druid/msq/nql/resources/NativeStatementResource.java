@@ -17,60 +17,62 @@
  * under the License.
  */
 
-package org.apache.druid.msq.sql.resources;
+package org.apache.druid.msq.nql.resources;
 
-
+import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.datatype.joda.ser.DateTimeSerializer;
+import com.fasterxml.jackson.jaxrs.smile.SmileMediaTypes;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.io.CountingOutputStream;
 import com.google.inject.Inject;
 import org.apache.druid.client.indexing.TaskPayloadResponse;
 import org.apache.druid.client.indexing.TaskStatusResponse;
 import org.apache.druid.error.DruidException;
 import org.apache.druid.error.Forbidden;
-import org.apache.druid.error.InvalidInput;
 import org.apache.druid.error.NotFound;
-import org.apache.druid.error.QueryExceptionCompat;
 import org.apache.druid.frame.Frame;
-import org.apache.druid.guice.annotations.MSQ;
+import org.apache.druid.guice.annotations.Json;
+import org.apache.druid.guice.annotations.Smile;
 import org.apache.druid.indexer.TaskStatusPlus;
 import org.apache.druid.java.util.common.ISE;
-import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.java.util.common.guava.Sequence;
 import org.apache.druid.java.util.common.guava.Yielder;
-import org.apache.druid.java.util.common.guava.Yielders;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.AbstractStatementResource;
 import org.apache.druid.msq.guice.MultiStageQuery;
 import org.apache.druid.msq.indexing.MSQControllerTask;
+import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.kernel.StageDefinition;
-import org.apache.druid.msq.sql.MSQTaskSqlEngine;
+import org.apache.druid.msq.nql.MSQNativeTaskQueryMaker;
+import org.apache.druid.msq.nql.NativeStatementResult;
 import org.apache.druid.msq.sql.StatementState;
-import org.apache.druid.msq.sql.entity.ColumnNameAndTypes;
-import org.apache.druid.msq.sql.entity.SqlStatementResult;
 import org.apache.druid.msq.util.AbstractResourceHelper;
-import org.apache.druid.msq.util.SqlStatementResourceHelper;
+import org.apache.druid.msq.util.NativeStatementResourceHelper;
+import org.apache.druid.query.BadJsonQueryException;
+import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.QueryContexts;
 import org.apache.druid.query.QueryException;
+import org.apache.druid.query.QueryToolChest;
 import org.apache.druid.rpc.indexing.OverlordClient;
+import org.apache.druid.segment.column.ColumnType;
+import org.apache.druid.segment.column.RowSignature;
+import org.apache.druid.server.QueryLifecycle;
+import org.apache.druid.server.QueryLifecycleFactory;
 import org.apache.druid.server.QueryResponse;
 import org.apache.druid.server.security.Action;
 import org.apache.druid.server.security.AuthenticationResult;
 import org.apache.druid.server.security.AuthorizationUtils;
 import org.apache.druid.server.security.AuthorizerMapper;
 import org.apache.druid.server.security.ForbiddenException;
-import org.apache.druid.sql.DirectStatement;
-import org.apache.druid.sql.HttpStatement;
-import org.apache.druid.sql.SqlRowTransformer;
-import org.apache.druid.sql.SqlStatementFactory;
+import org.apache.druid.sql.calcite.planner.ColumnMappings;
 import org.apache.druid.sql.http.ResultFormat;
-import org.apache.druid.sql.http.SqlQuery;
-import org.apache.druid.sql.http.SqlResource;
 import org.apache.druid.storage.StorageConnector;
+import org.joda.time.DateTime;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.Consumes;
@@ -86,45 +88,56 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.StreamingOutput;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 
-@Path("/druid/v2/sql/statements/")
-public class SqlStatementResource extends AbstractStatementResource<SqlStatementResult, MSQControllerTask>
+@Path("/druid/v2/native/statements/")
+public class NativeStatementResource extends AbstractStatementResource<NativeStatementResult, MSQNativeControllerTask>
 {
 
   public static final String RESULT_FORMAT = "__resultFormat";
   private static final String DURABLE_ERROR_TEMPLATE =
-      "The sql statement api cannot read from the select destination [%s] provided "
+      "The native statement api cannot read from the select destination [%s] provided "
       + "in the query context [%s] since it is not configured on the %s. It is recommended to configure durable storage "
       + "as it allows the user to fetch large result sets. Please contact your cluster admin to "
       + "configure durable storage.";
-  private static final Logger log = new Logger(SqlStatementResource.class);
-  private final SqlStatementFactory msqSqlStatementFactory;
+  private static final Logger log = new Logger(NativeStatementResource.class);
+  protected final ObjectMapper objectMapper;
+  protected final ObjectMapper smileMapper;
+  private final QueryLifecycleFactory lifecycleFactory;
   private final AuthorizerMapper authorizerMapper;
 
 
   @Inject
-  public SqlStatementResource(
-      final @MSQ SqlStatementFactory msqSqlStatementFactory,
-      final ObjectMapper jsonMapper,
+  public NativeStatementResource(
+      @Json final ObjectMapper jsonMapper,
+      @Smile final ObjectMapper smileMapper,
       final OverlordClient overlordClient,
-      final @MultiStageQuery StorageConnector storageConnector,
-      final AuthorizerMapper authorizerMapper
+      final QueryLifecycleFactory lifecycleFactory,
+      final AuthorizerMapper authorizerMapper,
+      final @MultiStageQuery StorageConnector storageConnector
   )
   {
     super(jsonMapper, overlordClient, storageConnector);
-    this.msqSqlStatementFactory = msqSqlStatementFactory;
+    this.lifecycleFactory = lifecycleFactory;
+    this.objectMapper = serializeDataTimeAsLong(jsonMapper);
+    this.smileMapper = serializeDataTimeAsLong(smileMapper);
     this.authorizerMapper = authorizerMapper;
+  }
+
+  private static String getPreviousEtag(final HttpServletRequest req)
+  {
+    return req.getHeader("If-None-Match");
   }
 
   @VisibleForTesting
   static void resultPusherInternal(
       ResultFormat.Writer writer,
       Yielder<Object[]> yielder,
-      List<ColumnNameAndTypes> rowSignature
+      List<String> names
   ) throws IOException
   {
     writer.writeResponseStart();
@@ -132,9 +145,9 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
     while (!yielder.isDone()) {
       writer.writeRowStart();
       Object[] row = yielder.get();
-      for (int i = 0; i < Math.min(rowSignature.size(), row.length); i++) {
+      for (int i = 0; i < Math.min(names.size(), row.length); i++) {
         writer.writeRowField(
-            rowSignature.get(i).getColName(),
+            names.get(i),
             row[i]
         );
       }
@@ -145,6 +158,7 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
     yielder.close();
   }
 
+
   protected DruidException queryNotFoundException(String queryId)
   {
     return NotFound.exception(
@@ -154,84 +168,52 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
     );
   }
 
-  /**
-   * API for clients like web-console to check if this resource is enabled.
-   */
-
-  @GET
-  @Path("/enabled")
-  @Produces(MediaType.APPLICATION_JSON)
-  public Response isEnabled(@Context final HttpServletRequest request)
-  {
-    // All authenticated users are authorized for this API.
-    AuthorizationUtils.setRequestAuthorizationAttributeIfNeeded(request);
-
-    return Response.ok(ImmutableMap.of("enabled", true)).build();
-  }
-
   @POST
   @Produces(MediaType.APPLICATION_JSON)
   @Consumes(MediaType.APPLICATION_JSON)
-  public Response doPost(final SqlQuery sqlQuery, @Context final HttpServletRequest req)
+  public Response doPost(
+      final InputStream in,
+      @QueryParam("pretty") final String pretty, //TODO: it seems useless
+      @Context final HttpServletRequest req
+  )
   {
-    SqlQuery modifiedQuery = createModifiedSqlQuery(sqlQuery);
-
-    final HttpStatement stmt = msqSqlStatementFactory.httpStatement(modifiedQuery, req);
-    final String sqlQueryId = stmt.sqlQueryId();
-    final String currThreadName = Thread.currentThread().getName();
-    boolean isDebug = false;
     try {
-      QueryContext queryContext = QueryContext.of(modifiedQuery.getContext());
-      isDebug = queryContext.isDebug();
-      contextChecks(queryContext);
-
-      Thread.currentThread().setName(StringUtils.format("statement_sql[%s]", sqlQueryId));
-
-      final DirectStatement.ResultSet plan = stmt.plan();
-      // in case the engine is async, the query is not run yet. We just return the taskID in case of non explain queries.
-      final QueryResponse<Object[]> response = plan.run();
-      final Sequence<Object[]> sequence = response.getResults();
-      final SqlRowTransformer rowTransformer = plan.createRowTransformer();
-
-      final boolean isTaskStruct = MSQTaskSqlEngine.TASK_STRUCT_FIELD_NAMES.equals(rowTransformer.getFieldList());
-
-      if (isTaskStruct) {
-        return buildTaskResponse(sequence, stmt.query().authResult());
-      } else {
-        // Used for EXPLAIN
-        return buildStandardResponse(sequence, modifiedQuery, sqlQueryId, rowTransformer);
+      AuthorizationUtils.setRequestAuthorizationAttributeIfNeeded(req);
+      final AuthenticationResult authenticationResult = AuthorizationUtils.authenticationResultFromRequest(req);
+      final Query<?> query;
+      try {
+        query = readQuery(req, in);
       }
+      catch (QueryException e) {
+        return Response.serverError().tag(e.getMessage()).build();
+      }
+
+      final QueryContext context = new QueryContext(query.getContext());
+
+      contextChecks(context);
+
+      RowSignature signature = getRowSignature(query);
+      MSQNativeTaskQueryMaker taskQueryMaker = new MSQNativeTaskQueryMaker(
+          null,
+          overlordClient,
+          jsonMapper,
+          getColumnMappings(signature),
+          signature
+      );
+
+      QueryResponse<Object[]> response = taskQueryMaker.runNativeQuery(query);
+      final Sequence<Object[]> sequence = response.getResults();
+
+      return buildTaskResponse(sequence, authenticationResult);
     }
     catch (DruidException e) {
-      stmt.reporter().failed(e);
       return buildNonOkResponse(e);
     }
-    catch (QueryException queryException) {
-      stmt.reporter().failed(queryException);
-      final DruidException underlyingException = DruidException.fromFailure(new QueryExceptionCompat(queryException));
-      return buildNonOkResponse(underlyingException);
-    }
-    catch (ForbiddenException e) {
-      log.debug("Got forbidden request for reason [%s]", e.getErrorMessage());
-      return buildNonOkResponse(Forbidden.exception());
-    }
-    // Calcite throws java.lang.AssertionError at various points in planning/validation.
-    catch (AssertionError | Exception e) {
-      stmt.reporter().failed(e);
-      if (isDebug) {
-        log.warn(e, "Failed to handle query [%s]", sqlQueryId);
-      } else {
-        log.noStackTrace().warn(e, "Failed to handle query [%s]", sqlQueryId);
-      }
+    catch (Exception e) {
       return buildNonOkResponse(
           DruidException.forPersona(DruidException.Persona.DEVELOPER)
                         .ofCategory(DruidException.Category.UNCATEGORIZED)
-                        .build("%s", e.getMessage())
-      );
-    }
-    finally {
-      stmt.close();
-      Thread.currentThread().setName(currThreadName);
+                        .build("%s", e.getMessage()));
     }
   }
 
@@ -246,7 +228,7 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       AuthorizationUtils.setRequestAuthorizationAttributeIfNeeded(req);
       final AuthenticationResult authenticationResult = AuthorizationUtils.authenticationResultFromRequest(req);
 
-      Optional<SqlStatementResult> sqlStatementResult = getStatementStatus(
+      Optional<NativeStatementResult> sqlStatementResult = getStatementStatus(
           queryId,
           authenticationResult,
           true,
@@ -302,11 +284,11 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       }
 
       TaskStatusPlus statusPlus = taskResponse.getStatus();
-      if (statusPlus == null || !MSQControllerTask.TYPE.equals(statusPlus.getType())) {
+      if (statusPlus == null || !MSQNativeControllerTask.TYPE.equals(statusPlus.getType())) {
         throw queryNotFoundException(queryId);
       }
 
-      MSQControllerTask msqControllerTask = getMSQControllerTaskAndCheckPermission(
+      MSQNativeControllerTask msqControllerTask = getMSQControllerTaskAndCheckPermission(
           queryId,
           authenticationResult,
           Action.READ,
@@ -314,15 +296,11 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       );
       throwIfQueryIsNotSuccessful(queryId, statusPlus);
 
-      Optional<List<ColumnNameAndTypes>> signature = SqlStatementResourceHelper.getSignature(msqControllerTask);
-      if (!signature.isPresent() || MSQControllerTask.isIngestion(msqControllerTask.getQuerySpec())) {
-        // Since it's not a select query, nothing to return.
-        return Response.ok().build();
-      }
 
       // returning results
       final Closer closer = Closer.create();
       final Optional<Yielder<Object[]>> results;
+      final RowSignature signature = getRowSignature(msqControllerTask.getQuerySpec().getQuery());
       results = getResultYielder(queryId, page, msqControllerTask, closer);
       if (!results.isPresent()) {
         // no results, return empty
@@ -332,14 +310,15 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       ResultFormat preferredFormat = getPreferredResultFormat(resultFormat, msqControllerTask.getQuerySpec());
       return Response.ok((StreamingOutput) outputStream -> resultPusher(
           queryId,
-          signature,
+          signature.getColumnNames(),
           closer,
           results,
           new CountingOutputStream(outputStream),
           preferredFormat
       )).build();
-    }
 
+
+    }
 
     catch (DruidException e) {
       return buildNonOkResponse(e);
@@ -356,14 +335,6 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
     }
   }
 
-  /**
-   * Queries can be canceled while in any {@link StatementState}. Canceling a query that has already completed will be a no-op.
-   *
-   * @param queryId queryId
-   * @param req     httpServletRequest
-   * @return HTTP 404 if the query ID does not exist,expired or originated by different user. HTTP 202 if the deletion
-   * request has been accepted.
-   */
   @DELETE
   @Path("/{id}")
   @Produces(MediaType.APPLICATION_JSON)
@@ -374,7 +345,7 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       AuthorizationUtils.setRequestAuthorizationAttributeIfNeeded(req);
       final AuthenticationResult authenticationResult = AuthorizationUtils.authenticationResultFromRequest(req);
 
-      Optional<SqlStatementResult> sqlStatementResult = getStatementStatus(
+      Optional<NativeStatementResult> sqlStatementResult = getStatementStatus(
           queryId,
           authenticationResult,
           false,
@@ -412,77 +383,30 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
     }
   }
 
-  private Response buildStandardResponse(
-      Sequence<Object[]> sequence,
-      SqlQuery sqlQuery,
-      String sqlQueryId,
-      SqlRowTransformer rowTransformer
-  ) throws IOException
+  private RowSignature getRowSignature(Query<?> query)
   {
-    final Yielder<Object[]> yielder0 = Yielders.each(sequence);
+    QueryLifecycle lifecycle = lifecycleFactory.factorize();
+    lifecycle.initialize(query);
+    QueryToolChest<?, Query<?>> toolChest = lifecycle.getToolChest();
+    return toolChest.resultArraySignature(query);
+  }
 
-    try {
-      final Response.ResponseBuilder responseBuilder = Response.ok((StreamingOutput) outputStream -> {
-        CountingOutputStream os = new CountingOutputStream(outputStream);
-        Yielder<Object[]> yielder = yielder0;
-
-        try (final ResultFormat.Writer writer = sqlQuery.getResultFormat().createFormatter(os, jsonMapper)) {
-          writer.writeResponseStart();
-
-          if (sqlQuery.includeHeader()) {
-            writer.writeHeader(
-                rowTransformer.getRowType(),
-                sqlQuery.includeTypesHeader(),
-                sqlQuery.includeSqlTypesHeader()
-            );
-          }
-
-          while (!yielder.isDone()) {
-            final Object[] row = yielder.get();
-            writer.writeRowStart();
-            for (int i = 0; i < rowTransformer.getFieldList().size(); i++) {
-              final Object value = rowTransformer.transform(row, i);
-              writer.writeRowField(rowTransformer.getFieldList().get(i), value);
-            }
-            writer.writeRowEnd();
-            yielder = yielder.next(null);
-          }
-
-          writer.writeResponseEnd();
-        }
-        catch (Exception e) {
-          log.error(e, "Unable to send SQL response [%s]", sqlQueryId);
-          throw new RuntimeException(e);
-        }
-        finally {
-          yielder.close();
-        }
-      });
-
-      if (sqlQuery.includeHeader()) {
-        responseBuilder.header(SqlResource.SQL_HEADER_RESPONSE_HEADER, SqlResource.SQL_HEADER_VALUE);
-      }
-
-      return responseBuilder.build();
-    }
-    catch (Throwable e) {
-      // make sure to close yielder if anything happened before starting to serialize the response.
-      yielder0.close();
-      throw e;
-    }
+  private ColumnMappings getColumnMappings(final RowSignature signature)
+  {
+    return ColumnMappings.identity(signature);
   }
 
   @Override
-  protected MSQControllerTask getTaskEntity(final String queryId)
+  protected MSQNativeControllerTask getTaskEntity(String queryId)
   {
     TaskPayloadResponse taskPayloadResponse = contactOverlord(overlordClient.taskPayload(queryId), queryId);
-    SqlStatementResourceHelper.isMSQPayload(taskPayloadResponse, queryId);
+    NativeStatementResourceHelper.isMSQPayload(taskPayloadResponse, queryId);
 
-    return (MSQControllerTask) taskPayloadResponse.getPayload();
+    return (MSQNativeControllerTask) taskPayloadResponse.getPayload();
   }
 
   @Override
-  protected Optional<SqlStatementResult> getStatementStatus(
+  protected Optional<NativeStatementResult> getStatementStatus(
       String queryId,
       AuthenticationResult authenticationResult,
       boolean withResults,
@@ -495,12 +419,12 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
     }
 
     TaskStatusPlus statusPlus = taskResponse.getStatus();
-    if (statusPlus == null || !MSQControllerTask.TYPE.equals(statusPlus.getType())) {
+    if (statusPlus == null || !MSQNativeControllerTask.TYPE.equals(statusPlus.getType())) {
       return Optional.empty();
     }
 
     // since we need the controller payload for auth checks.
-    MSQControllerTask msqControllerTask = getMSQControllerTaskAndCheckPermission(
+    MSQNativeControllerTask msqControllerTask = getMSQControllerTaskAndCheckPermission(
         queryId,
         authenticationResult,
         forAction,
@@ -509,7 +433,7 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
     StatementState statementState = AbstractResourceHelper.getSqlStatementState(statusPlus);
 
     if (StatementState.FAILED == statementState) {
-      return SqlStatementResourceHelper.getExceptionPayload(
+      return NativeStatementResourceHelper.getExceptionPayload(
           queryId,
           taskResponse,
           statusPlus,
@@ -517,46 +441,51 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
           contactOverlord(overlordClient.taskReportAsMap(queryId), queryId)
       );
     } else {
-      Optional<List<ColumnNameAndTypes>> signature = SqlStatementResourceHelper.getSignature(msqControllerTask);
-      return Optional.of(new SqlStatementResult(
+
+      final Map<String, ColumnType> signature = NativeStatementResourceHelper.getColumnTypes(msqControllerTask.getSignature());
+      return Optional.of(new NativeStatementResult(
           queryId,
           statementState,
           taskResponse.getStatus().getCreatedTime(),
-          signature.orElse(null),
+          signature,
           taskResponse.getStatus().getDuration(),
-          withResults ? getResultSetInformation(
+          getResultSetInformation(
               queryId,
               msqControllerTask.getDataSource(),
               statementState,
               msqControllerTask.getQuerySpec().getDestination()
-          ).orElse(null) : null,
+          ).orElse(null),
           null
       ));
     }
   }
 
-  /**
-   * Creates a new sqlQuery from the user submitted sqlQuery after performing required modifications.
-   */
-  private SqlQuery createModifiedSqlQuery(SqlQuery sqlQuery)
+  private void resultPusher(
+      String queryId,
+      List<String> names,
+      Closer closer,
+      Optional<Yielder<Object[]>> results,
+      CountingOutputStream os,
+      ResultFormat resultFormat
+  ) throws IOException
   {
-    Map<String, Object> context = sqlQuery.getContext();
-    if (context.containsKey(RESULT_FORMAT)) {
-      throw InvalidInput.exception("Query context parameter [%s] is not allowed", RESULT_FORMAT);
+    try {
+      try (final ResultFormat.Writer writer = resultFormat.createFormatter(os, jsonMapper)) {
+        Yielder<Object[]> yielder = results.get();
+        resultPusherInternal(writer, yielder, names);
+      }
+      catch (Exception e) {
+        log.error(e, "Unable to stream results back for query[%s]", queryId);
+        throw new ISE(e, "Unable to stream results back for query[%s]", queryId);
+      }
     }
-    Map<String, Object> modifiedContext = ImmutableMap.<String, Object>builder()
-                                                      .putAll(context)
-                                                      .put(RESULT_FORMAT, sqlQuery.getResultFormat().toString())
-                                                      .build();
-    return new SqlQuery(
-        sqlQuery.getQuery(),
-        sqlQuery.getResultFormat(),
-        sqlQuery.includeHeader(),
-        sqlQuery.includeTypesHeader(),
-        sqlQuery.includeSqlTypesHeader(),
-        modifiedContext,
-        sqlQuery.getParameters()
-    );
+    catch (Exception e) {
+      log.error(e, "Unable to stream results back for query[%s]", queryId);
+      throw new ISE(e, "Unable to stream results back for query[%s]", queryId);
+    }
+    finally {
+      closer.close();
+    }
   }
 
   private ResultFormat getPreferredResultFormat(String resultFormatParam, MSQSpec msqSpec)
@@ -581,44 +510,46 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
   protected Sequence<Object[]> getResultSequence(
       final StageDefinition finalStage,
       final Frame frame,
-      MSQControllerTask msqControllerTask
+      MSQNativeControllerTask msqControllerTask
   )
   {
-    return SqlStatementResourceHelper.getResultSequence(
-        msqControllerTask,
+    return NativeStatementResourceHelper.getResultSequence(
         finalStage,
         frame,
-        jsonMapper
+        msqControllerTask.getQuerySpec().getColumnMappings()
     );
   }
 
-  private void resultPusher(
-      String queryId,
-      Optional<List<ColumnNameAndTypes>> signature,
-      Closer closer,
-      Optional<Yielder<Object[]>> results,
-      CountingOutputStream os,
-      ResultFormat resultFormat
+  private Query<?> readQuery(
+      final HttpServletRequest req,
+      final InputStream in
   ) throws IOException
   {
+    final Query<?> baseQuery;
     try {
-      try (final ResultFormat.Writer writer = resultFormat.createFormatter(os, jsonMapper)) {
-        Yielder<Object[]> yielder = results.get();
-        List<ColumnNameAndTypes> rowSignature = signature.get();
-        resultPusherInternal(writer, yielder, rowSignature);
-      }
-      catch (Exception e) {
-        log.error(e, "Unable to stream results back for query[%s]", queryId);
-        throw new ISE(e, "Unable to stream results back for query[%s]", queryId);
-      }
+      baseQuery = getRequestMapper(req).readValue(in, Query.class);
     }
-    catch (Exception e) {
-      log.error(e, "Unable to stream results back for query[%s]", queryId);
-      throw new ISE(e, "Unable to stream results back for query[%s]", queryId);
+    catch (JsonParseException e) {
+      throw new BadJsonQueryException(e);
     }
-    finally {
-      closer.close();
+
+    String prevEtag = getPreviousEtag(req);
+    if (prevEtag == null) {
+      return baseQuery;
     }
+
+    return baseQuery.withOverriddenContext(
+        QueryContexts.override(
+            baseQuery.getContext(),
+            "If-None-Match",
+            prevEtag
+        )
+    );
+  }
+
+  protected ObjectMapper serializeDataTimeAsLong(ObjectMapper mapper)
+  {
+    return mapper.copy().registerModule(new SimpleModule().addSerializer(DateTime.class, new DateTimeSerializer()));
   }
 
   @Override
@@ -627,5 +558,9 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
     return DURABLE_ERROR_TEMPLATE;
   }
 
-
+  private ObjectMapper getRequestMapper(HttpServletRequest req)
+  {
+    String requestType = req.getContentType();
+    return SmileMediaTypes.APPLICATION_JACKSON_SMILE.equals(requestType) ? smileMapper : objectMapper;
+  }
 }

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.druid.msq.sql.entity;
+package org.apache.druid.msq.nql;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -25,15 +25,16 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.druid.error.ErrorResponse;
 import org.apache.druid.msq.StatementResult;
 import org.apache.druid.msq.sql.StatementState;
+import org.apache.druid.msq.sql.entity.ResultSetInformation;
+import org.apache.druid.segment.column.ColumnType;
 import org.joda.time.DateTime;
 
 import javax.annotation.Nullable;
-import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
-public class SqlStatementResult implements StatementResult
+public class NativeStatementResult implements StatementResult
 {
-
   private final String queryId;
 
   private final StatementState state;
@@ -41,7 +42,7 @@ public class SqlStatementResult implements StatementResult
   private final DateTime createdAt;
 
   @Nullable
-  private final List<ColumnNameAndTypes> sqlRowSignature;
+  private final Map<String, ColumnType> rowSignature;
 
   @Nullable
   private final Long durationMs;
@@ -54,7 +55,7 @@ public class SqlStatementResult implements StatementResult
 
 
   @JsonCreator
-  public SqlStatementResult(
+  public NativeStatementResult(
       @JsonProperty("queryId")
       String queryId,
       @JsonProperty("state")
@@ -62,7 +63,7 @@ public class SqlStatementResult implements StatementResult
       @JsonProperty("createdAt")
       DateTime createdAt,
       @Nullable @JsonProperty("schema")
-      List<ColumnNameAndTypes> sqlRowSignature,
+      Map<String, ColumnType> rowSignature,
       @Nullable @JsonProperty("durationMs")
       Long durationMs,
       @Nullable @JsonProperty("result")
@@ -75,7 +76,7 @@ public class SqlStatementResult implements StatementResult
     this.queryId = queryId;
     this.state = state;
     this.createdAt = createdAt;
-    this.sqlRowSignature = sqlRowSignature;
+    this.rowSignature = rowSignature;
     this.durationMs = durationMs;
     this.resultSetInformation = resultSetInformation;
     this.errorResponse = errorResponse;
@@ -102,9 +103,9 @@ public class SqlStatementResult implements StatementResult
   @JsonProperty("schema")
   @Nullable
   @JsonInclude(JsonInclude.Include.NON_NULL)
-  public List<ColumnNameAndTypes> getSqlRowSignature()
+  public Map<String, ColumnType> getRowSignature()
   {
-    return sqlRowSignature;
+    return rowSignature;
   }
 
   @JsonProperty
@@ -141,11 +142,11 @@ public class SqlStatementResult implements StatementResult
     if (o == null || getClass() != o.getClass()) {
       return false;
     }
-    SqlStatementResult that = (SqlStatementResult) o;
+    NativeStatementResult that = (NativeStatementResult) o;
     return Objects.equals(queryId, that.queryId) && state == that.state && Objects.equals(
         createdAt,
         that.createdAt
-    ) && Objects.equals(sqlRowSignature, that.sqlRowSignature) && Objects.equals(
+    ) && Objects.equals(rowSignature, that.rowSignature) && Objects.equals(
         durationMs,
         that.durationMs
     ) && Objects.equals(resultSetInformation, that.resultSetInformation) && Objects.equals(
@@ -161,7 +162,7 @@ public class SqlStatementResult implements StatementResult
         queryId,
         state,
         createdAt,
-        sqlRowSignature,
+        rowSignature,
         durationMs,
         resultSetInformation,
         errorResponse == null ? null : errorResponse.getAsMap()
@@ -171,11 +172,11 @@ public class SqlStatementResult implements StatementResult
   @Override
   public String toString()
   {
-    return "SqlStatementResult{" +
+    return "NativeStatementResult{" +
            "queryId='" + queryId + '\'' +
            ", state=" + state +
            ", createdAt=" + createdAt +
-           ", sqlRowSignature=" + sqlRowSignature +
+           ", rowSignature=" + rowSignature +
            ", durationInMs=" + durationMs +
            ", resultSetInformation=" + resultSetInformation +
            ", errorResponse=" + (errorResponse == null

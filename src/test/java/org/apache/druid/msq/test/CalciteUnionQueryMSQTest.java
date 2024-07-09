@@ -91,7 +91,7 @@ public class CalciteUnionQueryMSQTest extends CalciteUnionQueryTest
             0,
             0
         );
-    final MSQTestOverlordServiceClient indexingServiceClient = new MSQTestOverlordServiceClient(
+    final MSQSQLTestOverlordServiceClient indexingServiceClient = new MSQSQLTestOverlordServiceClient(
         queryJsonMapper,
         injector,
         new MSQTestTaskActionClient(queryJsonMapper, injector),
@@ -105,7 +105,7 @@ public class CalciteUnionQueryMSQTest extends CalciteUnionQueryTest
   protected QueryTestBuilder testBuilder()
   {
     return new QueryTestBuilder(new BaseCalciteQueryTest.CalciteTestConfig(true))
-        .addCustomRunner(new ExtractResultsFactory(() -> (MSQTestOverlordServiceClient) ((MSQTaskSqlEngine) queryFramework().engine()).overlordClient()))
+        .addCustomRunner(new ExtractResultsFactory(() -> (MSQSQLTestOverlordServiceClient) ((MSQTaskSqlEngine) queryFramework().engine()).overlordClient()))
         .skipVectorize(true)
         .verifyNativeQueries(new VerifyMSQSupportedNativeQueriesPredicate())
         .msqCompatible(msqCompatible);

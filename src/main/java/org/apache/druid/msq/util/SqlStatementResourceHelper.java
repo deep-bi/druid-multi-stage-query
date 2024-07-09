@@ -29,10 +29,7 @@ import org.apache.druid.error.DruidException;
 import org.apache.druid.error.NotFound;
 import org.apache.druid.frame.Frame;
 import org.apache.druid.frame.processor.FrameProcessors;
-import org.apache.druid.indexer.TaskLocation;
-import org.apache.druid.indexer.TaskState;
 import org.apache.druid.indexer.TaskStatusPlus;
-import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.guava.Sequence;
 import org.apache.druid.java.util.common.guava.Sequences;
 import org.apache.druid.msq.counters.ChannelCounters;
@@ -48,7 +45,7 @@ import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
 import org.apache.druid.msq.indexing.report.MSQStagesReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.kernel.StageDefinition;
-import org.apache.druid.msq.sql.SqlStatementState;
+import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.entity.ColumnNameAndTypes;
 import org.apache.druid.msq.sql.entity.PageInformation;
 import org.apache.druid.msq.sql.entity.SqlStatementResult;
@@ -69,7 +66,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-public class SqlStatementResourceHelper
+public class SqlStatementResourceHelper extends AbstractResourceHelper
 {
   public static Optional<List<ColumnNameAndTypes>> getSignature(
       MSQControllerTask msqControllerTask
@@ -110,29 +107,6 @@ public class SqlStatementResourceHelper
 
     if (MSQControllerTask.class != taskPayloadResponse.getPayload().getClass()) {
       throw NotFound.exception("Query[%s] not found", queryId);
-    }
-  }
-
-  public static SqlStatementState getSqlStatementState(TaskStatusPlus taskStatusPlus)
-  {
-    TaskState state = taskStatusPlus.getStatusCode();
-    if (state == null) {
-      return SqlStatementState.ACCEPTED;
-    }
-
-    switch (state) {
-      case FAILED:
-        return SqlStatementState.FAILED;
-      case RUNNING:
-        if (TaskLocation.unknown().equals(taskStatusPlus.getLocation())) {
-          return SqlStatementState.ACCEPTED;
-        } else {
-          return SqlStatementState.RUNNING;
-        }
-      case SUCCESS:
-        return SqlStatementState.SUCCESS;
-      default:
-        throw new ISE("Unrecognized state[%s] found.", state);
     }
   }
 
@@ -242,7 +216,7 @@ public class SqlStatementResourceHelper
       String queryId,
       TaskStatusResponse taskResponse,
       TaskStatusPlus statusPlus,
-      SqlStatementState sqlStatementState,
+      StatementState statementState,
       Map<String, Object> msqPayload
   )
   {
@@ -251,7 +225,7 @@ public class SqlStatementResourceHelper
     if (exceptionDetails == null || exception == null) {
       return Optional.of(new SqlStatementResult(
           queryId,
-          sqlStatementState,
+          statementState,
           taskResponse.getStatus().getCreatedTime(),
           null,
           taskResponse.getStatus().getDuration(),
@@ -272,7 +246,7 @@ public class SqlStatementResourceHelper
     }
     return Optional.of(new SqlStatementResult(
         queryId,
-        sqlStatementState,
+        statementState,
         taskResponse.getStatus().getCreatedTime(),
         null,
         taskResponse.getStatus().getDuration(),
@@ -359,24 +333,5 @@ public class SqlStatementResourceHelper
       }
     }
     return null;
-  }
-
-  public static Map<String, Object> getQueryExceptionDetails(Map<String, Object> payload)
-  {
-    return getMap(getMap(payload, "status"), "errorReport");
-  }
-
-  public static Map<String, Object> getMap(Map<String, Object> map, String key)
-  {
-    if (map == null) {
-      return null;
-    }
-    return (Map<String, Object>) map.get(key);
-  }
-
-  public static Map<String, Object> getPayload(Map<String, Object> results)
-  {
-    Map<String, Object> msqReport = getMap(results, "multiStageQuery");
-    return getMap(msqReport, "payload");
   }
 }

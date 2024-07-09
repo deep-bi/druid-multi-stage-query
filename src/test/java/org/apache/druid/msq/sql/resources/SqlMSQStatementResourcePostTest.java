@@ -33,7 +33,7 @@ import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.apache.druid.msq.indexing.destination.MSQSelectDestination;
 import org.apache.druid.msq.indexing.error.InsertCannotBeEmptyFault;
 import org.apache.druid.msq.indexing.error.MSQException;
-import org.apache.druid.msq.sql.SqlStatementState;
+import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.entity.ColumnNameAndTypes;
 import org.apache.druid.msq.sql.entity.PageInformation;
 import org.apache.druid.msq.sql.entity.ResultSetInformation;
@@ -112,7 +112,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
     String taskId = ((SqlStatementResult) response.getEntity()).getQueryId();
 
     SqlStatementResult expected =
-        new SqlStatementResult(taskId, SqlStatementState.SUCCESS,
+        new SqlStatementResult(taskId, StatementState.SUCCESS,
                                MSQTestOverlordServiceClient.CREATED_TIME,
                                ImmutableList.of(
                                    new ColumnNameAndTypes(
@@ -199,7 +199,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
 
     SqlStatementResult expected = new SqlStatementResult(
         actual.getQueryId(),
-        SqlStatementState.SUCCESS,
+        StatementState.SUCCESS,
         MSQTestOverlordServiceClient.CREATED_TIME,
         null,
         MSQTestOverlordServiceClient.DURATION,
@@ -229,7 +229,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
 
     SqlStatementResult expected = new SqlStatementResult(
         actual.getQueryId(),
-        SqlStatementState.SUCCESS,
+        StatementState.SUCCESS,
         MSQTestOverlordServiceClient.CREATED_TIME,
         null,
         MSQTestOverlordServiceClient.DURATION,
@@ -264,7 +264,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
 
     SqlStatementResult expected = new SqlStatementResult(
         actual.getQueryId(),
-        SqlStatementState.FAILED,
+        StatementState.FAILED,
         MSQTestOverlordServiceClient.CREATED_TIME,
         null,
         MSQTestOverlordServiceClient.DURATION,
@@ -689,7 +689,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
 
     SqlStatementResult expected = new SqlStatementResult(
         actual.getQueryId(),
-        SqlStatementState.SUCCESS,
+        StatementState.SUCCESS,
         MSQTestOverlordServiceClient.CREATED_TIME,
         null,
         MSQTestOverlordServiceClient.DURATION,
@@ -732,7 +732,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
 
     SqlStatementResult expected = new SqlStatementResult(
         actual.getQueryId(),
-        SqlStatementState.SUCCESS,
+        StatementState.SUCCESS,
         MSQTestOverlordServiceClient.CREATED_TIME,
         null,
         MSQTestOverlordServiceClient.DURATION,

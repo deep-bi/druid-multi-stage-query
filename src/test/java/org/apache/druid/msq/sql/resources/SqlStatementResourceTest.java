@@ -57,8 +57,9 @@ import org.apache.druid.msq.indexing.report.MSQStatusReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.indexing.report.MSQTaskReportTest;
+import org.apache.druid.msq.nql.NativeStatementResult;
 import org.apache.druid.msq.sql.MSQTaskQueryMaker;
-import org.apache.druid.msq.sql.SqlStatementState;
+import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.entity.ColumnNameAndTypes;
 import org.apache.druid.msq.sql.entity.PageInformation;
 import org.apache.druid.msq.sql.entity.ResultSetInformation;
@@ -111,11 +112,11 @@ public class SqlStatementResourceTest extends MSQTestBase
 {
   public static final DateTime CREATED_TIME = DateTimes.of("2023-05-31T12:00Z");
   private static final ObjectMapper JSON_MAPPER = TestHelper.makeJsonMapper();
-  private static final String ACCEPTED_SELECT_MSQ_QUERY = "QUERY_ID_1";
-  private static final String RUNNING_SELECT_MSQ_QUERY = "QUERY_ID_2";
-  private static final String FINISHED_SELECT_MSQ_QUERY = "QUERY_ID_3";
+  public static final String ACCEPTED_SELECT_MSQ_QUERY = "QUERY_ID_1";
+  public static final String RUNNING_SELECT_MSQ_QUERY = "QUERY_ID_2";
+  public static final String FINISHED_SELECT_MSQ_QUERY = "QUERY_ID_3";
 
-  private static final String ERRORED_SELECT_MSQ_QUERY = "QUERY_ID_4";
+  public static final String ERRORED_SELECT_MSQ_QUERY = "QUERY_ID_4";
 
 
   private static final String RUNNING_NON_MSQ_TASK = "QUERY_ID_5";
@@ -230,7 +231,7 @@ public class SqlStatementResourceTest extends MSQTestBase
       null
   );
 
-  private static final List<Object[]> RESULT_ROWS = ImmutableList.of(
+  public static final List<Object[]> RESULT_ROWS = ImmutableList.of(
       new Object[]{123, "foo", "bar"},
       new Object[]{234, "foo1", "bar1"}
   );
@@ -345,13 +346,13 @@ public class SqlStatementResourceTest extends MSQTestBase
           ValueType.STRING.name()
       )
   );
-  private static final String FAILURE_MSG = "failure msg";
+  public static final String FAILURE_MSG = "failure msg";
   private static SqlStatementResource resource;
 
-  private static String SUPERUSER = "superuser";
-  private static String STATE_R_USER = "stateR";
-  private static String STATE_W_USER = "stateW";
-  private static String STATE_RW_USER = "stateRW";
+  public static String SUPERUSER = "superuser";
+  public static String STATE_R_USER = "stateR";
+  public static String STATE_W_USER = "stateW";
+  public static String STATE_RW_USER = "stateRW";
 
   private AuthorizerMapper authorizerMapper = new AuthorizerMapper(null)
   {
@@ -671,6 +672,8 @@ public class SqlStatementResourceTest extends MSQTestBase
   {
     if (response.getEntity() instanceof SqlStatementResult) {
       return ((SqlStatementResult) response.getEntity()).getErrorResponse().getUnderlyingException().getMessage();
+    } else if (response.getEntity() instanceof NativeStatementResult) {
+      return ((NativeStatementResult) response.getEntity()).getErrorResponse().getUnderlyingException().getMessage();
     } else {
       return ((ErrorResponse) response.getEntity()).getUnderlyingException().getMessage();
     }
@@ -721,7 +724,7 @@ public class SqlStatementResourceTest extends MSQTestBase
     Assert.assertEquals(
         new SqlStatementResult(
             ACCEPTED_SELECT_MSQ_QUERY,
-            SqlStatementState.ACCEPTED,
+            StatementState.ACCEPTED,
             CREATED_TIME,
             COL_NAME_AND_TYPES,
             null,
@@ -736,7 +739,7 @@ public class SqlStatementResourceTest extends MSQTestBase
         StringUtils.format(
             "Query[%s] is currently in [%s] state. Please wait for it to complete.",
             ACCEPTED_SELECT_MSQ_QUERY,
-            SqlStatementState.ACCEPTED
+            StatementState.ACCEPTED
         ),
         Response.Status.BAD_REQUEST
     );
@@ -755,7 +758,7 @@ public class SqlStatementResourceTest extends MSQTestBase
     Assert.assertEquals(
         new SqlStatementResult(
             RUNNING_SELECT_MSQ_QUERY,
-            SqlStatementState.RUNNING,
+            StatementState.RUNNING,
             CREATED_TIME,
             COL_NAME_AND_TYPES,
             null,
@@ -770,7 +773,7 @@ public class SqlStatementResourceTest extends MSQTestBase
         StringUtils.format(
             "Query[%s] is currently in [%s] state. Please wait for it to complete.",
             RUNNING_SELECT_MSQ_QUERY,
-            SqlStatementState.RUNNING
+            StatementState.RUNNING
         ),
         Response.Status.BAD_REQUEST
     );
@@ -787,7 +790,7 @@ public class SqlStatementResourceTest extends MSQTestBase
     Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
     Assert.assertEquals(objectMapper.writeValueAsString(new SqlStatementResult(
         FINISHED_SELECT_MSQ_QUERY,
-        SqlStatementState.SUCCESS,
+        StatementState.SUCCESS,
         CREATED_TIME,
         COL_NAME_AND_TYPES,
         100L,
@@ -875,7 +878,7 @@ public class SqlStatementResourceTest extends MSQTestBase
     Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
     Assert.assertEquals(new SqlStatementResult(
         FINISHED_INSERT_MSQ_QUERY,
-        SqlStatementState.SUCCESS,
+        StatementState.SUCCESS,
         CREATED_TIME,
         null,
         100L,
@@ -916,7 +919,7 @@ public class SqlStatementResourceTest extends MSQTestBase
     Assert.assertEquals(
         new SqlStatementResult(
             ACCEPTED_INSERT_MSQ_TASK,
-            SqlStatementState.ACCEPTED,
+            StatementState.ACCEPTED,
             CREATED_TIME,
             null,
             null,
@@ -931,7 +934,7 @@ public class SqlStatementResourceTest extends MSQTestBase
         StringUtils.format(
             "Query[%s] is currently in [%s] state. Please wait for it to complete.",
             ACCEPTED_INSERT_MSQ_TASK,
-            SqlStatementState.ACCEPTED
+            StatementState.ACCEPTED
         ),
         Response.Status.BAD_REQUEST
     );
@@ -949,7 +952,7 @@ public class SqlStatementResourceTest extends MSQTestBase
     Assert.assertEquals(
         new SqlStatementResult(
             RUNNING_INSERT_MSQ_QUERY,
-            SqlStatementState.RUNNING,
+            StatementState.RUNNING,
             CREATED_TIME,
             null,
             null,
@@ -964,7 +967,7 @@ public class SqlStatementResourceTest extends MSQTestBase
         StringUtils.format(
             "Query[%s] is currently in [%s] state. Please wait for it to complete.",
             RUNNING_INSERT_MSQ_QUERY,
-            SqlStatementState.RUNNING
+            StatementState.RUNNING
         ),
         Response.Status.BAD_REQUEST
     );

@@ -70,7 +70,7 @@ import java.util.Optional;
 import java.util.Set;
 
 @JsonTypeName(MSQControllerTask.TYPE)
-public class MSQControllerTask extends AbstractTask implements ClientTaskQuery
+public class MSQControllerTask extends AbstractTask implements ClientTaskQuery, HasQuerySpec
 {
   public static final String TYPE = "query_controller";
   public static final String DUMMY_DATASOURCE_FOR_SELECT = "__query_select";
@@ -156,6 +156,7 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery
     return ImmutableSet.of();
   }
 
+  @Override
   @JsonProperty("spec")
   public MSQSpec getQuerySpec()
   {

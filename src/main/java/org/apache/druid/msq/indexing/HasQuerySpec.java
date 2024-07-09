@@ -17,26 +17,10 @@
  * under the License.
  */
 
-package org.apache.druid.msq.sql;
+package org.apache.druid.msq.indexing;
 
-import org.apache.druid.sql.http.SqlQuery;
-
-import javax.servlet.http.HttpServletRequest;
-
-/**
- * Represents the status of the sql statements issues via
- * {@link org.apache.druid.msq.sql.resources.SqlStatementResource#doPost(SqlQuery, HttpServletRequest)} and returned in
- * {@link org.apache.druid.msq.sql.entity.SqlStatementResult}
- */
-public enum SqlStatementState
+public interface HasQuerySpec
 {
-  // The statement is accepted but not yes assigned any worker. In MSQ engine, the statement is in ACCEPTED state
-  // till the overlord assigns a TaskLocation to the controller task.
-  ACCEPTED,
-  // The statement is running.
-  RUNNING,
-  // The statement is successful.
-  SUCCESS,
-  // The statement failed.
-  FAILED
+
+  MSQSpec getQuerySpec();
 }
