@@ -559,7 +559,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
       NativeStatementResource queryResource
   )
   {
-    return queryResource.doPost(new ByteArrayInputStream(bytes), null, req);
+    return queryResource.doPost(new ByteArrayInputStream(bytes), req);
   }
 
   private void assertExpectedResults(String expectedResult, Response resultsResponse, ObjectMapper objectMapper)

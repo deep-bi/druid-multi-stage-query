@@ -1052,7 +1052,8 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
 
       return Yielders.each(
           Sequences.concat(ControllerUtil.createFrameChannelSequences(queryKernel, inputChannels, finalStageId).collect(
-                       Collectors.toList())).flatMap(
+                       Collectors.toList()))
+                   .flatMap(
                        frame ->
                            SqlStatementResourceHelper.getResultSequence(
                                task,

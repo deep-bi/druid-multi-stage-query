@@ -173,7 +173,6 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
   @Consumes(MediaType.APPLICATION_JSON)
   public Response doPost(
       final InputStream in,
-      @QueryParam("pretty") final String pretty, //TODO: it seems useless
       @Context final HttpServletRequest req
   )
   {

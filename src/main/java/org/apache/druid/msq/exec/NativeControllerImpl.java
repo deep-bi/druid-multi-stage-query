@@ -191,7 +191,6 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
       );
       return builder.build();
     } else if (querySpec.getDestination() instanceof DurableStorageMSQDestination) {
-
       return ControllerUtil.queryDefinitionForDurableStorage(queryDef, tuningConfig);
     } else if (querySpec.getDestination() instanceof TaskReportMSQDestination) {
       return queryDef;
@@ -241,7 +240,8 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
 
       return Yielders.each(
           Sequences.concat(ControllerUtil.createFrameChannelSequences(queryKernel, inputChannels, finalStageId).collect(
-                       Collectors.toList())).flatMap(
+                       Collectors.toList()))
+                   .flatMap(
                        frame ->
                            NativeStatementResourceHelper.getResultSequence(
                                queryDef.getFinalStageDefinition(),
