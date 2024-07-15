@@ -25,4 +25,4 @@ Replace `$DRUID_HOME/extensions/druid-multi-stage-query/druid-multi-stage-query-
 
 Restart Druid.
 
-To display query results and stage info of native-query-controller tasks on the web-ui, patched web-console should be used.
+### [NOTE] To display query results and stage info of native-query-controller tasks on the web-ui, patched web-console should be used.

@@ -397,5 +397,6 @@ curl -X DELETE  http://localhost:8888/druid/v2/native/statements/query-73d3f311-
 
 Sample response:
 
-If query was in `ACCEPTED` or `RUNNING` status and was actually cancelled returns empty response with 202 status
-If query was in `SUCCES` or `FAILED` status and don't need to be cancelled returns empty response with 200 status
+If query was in `ACCEPTED` or `RUNNING` status and was actually cancelled returns empty response with 202 status.
+
+If query was in `SUCCESS` or `FAILED` status and don't need to be cancelled returns empty response with 200 status.
