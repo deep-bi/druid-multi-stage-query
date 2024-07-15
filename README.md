@@ -24,7 +24,19 @@ Deep.bi fork of MSQ extension for apache druid, with ability to run queries from
 * [Native query endpoints](docs/endpoints.md)
 * [Native query example requests](docs/requests.md)
 
-# `druid-multi-stage-query` developer notes
+# Installation
+
+* Preparation
+  * Download provided in current repository druid-multi-stage-query-29.0.1.jar and web-console-29.0.1.jar
+* Replace existent jars
+  * Existent {$DRUID_HOME}/extensions/druid-multi-stage-query/druid-multi-stage-query-29.0.1.jar should be replaced with provided druid-multi-stage-query-29.0.1.jar
+  * Existent {$DRUID_HOME}/lib/web-console-29.0.1.jar should be replaced with provided web-console-29.0.1.jar
+* Apply changes
+  * Restart druid
+  * Empty cache and hard reload web-ui to apply web-console module changes
+
+
+## `druid-multi-stage-query` developer notes
 
 This document provides developer notes for the major packages of the `druid-multi-stage-query` extension. It does not
 discuss future plans; these are discussed on the list or in GitHub issues.
