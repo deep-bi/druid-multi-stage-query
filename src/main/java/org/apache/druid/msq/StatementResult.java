@@ -19,7 +19,18 @@
 
 package org.apache.druid.msq;
 
+import org.apache.druid.error.ErrorResponse;
+import org.apache.druid.msq.sql.StatementState;
+import org.apache.druid.msq.sql.entity.ResultSetInformation;
+import org.joda.time.DateTime;
+
 public interface StatementResult
 {
 
+  ErrorResponse getErrorResponse();
+  String getQueryId();
+  StatementState getState();
+  DateTime getCreatedAt();
+  Long getDurationMs();
+  ResultSetInformation getResultSetInformation();
 }

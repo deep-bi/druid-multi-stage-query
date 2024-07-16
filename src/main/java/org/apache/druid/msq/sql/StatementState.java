@@ -26,8 +26,9 @@ import javax.servlet.http.HttpServletRequest;
 
 /**
  * Represents the status of the sql statements issues via
- * {@link SqlStatementResource#doPost(SqlQuery, HttpServletRequest)} and returned in
- * {@link org.apache.druid.msq.sql.entity.SqlStatementResult}
+ * {@link SqlStatementResource#doPost(SqlQuery, HttpServletRequest)} or
+ * {@link org.apache.druid.msq.nql.resources.NativeStatementResource#doPost(java.io.InputStream, HttpServletRequest)} and returned in
+ * {@link org.apache.druid.msq.StatementResult}
  */
 public enum StatementState
 {

@@ -344,14 +344,14 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
       AuthorizationUtils.setRequestAuthorizationAttributeIfNeeded(req);
       final AuthenticationResult authenticationResult = AuthorizationUtils.authenticationResultFromRequest(req);
 
-      Optional<NativeStatementResult> sqlStatementResult = getStatementStatus(
+      Optional<NativeStatementResult> nativeStatementResult = getStatementStatus(
           queryId,
           authenticationResult,
           false,
           Action.WRITE
       );
-      if (sqlStatementResult.isPresent()) {
-        switch (sqlStatementResult.get().getState()) {
+      if (nativeStatementResult.isPresent()) {
+        switch (nativeStatementResult.get().getState()) {
           case ACCEPTED:
           case RUNNING:
             overlordClient.cancelTask(queryId);
@@ -361,7 +361,7 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
             // we would also want to clean up the results in the future.
             return Response.ok().build();
           default:
-            throw new ISE("Illegal State[%s] encountered", sqlStatementResult.get().getState());
+            throw new ISE("Illegal State[%s] encountered", nativeStatementResult.get().getState());
         }
       } else {
         throw queryNotFoundException(queryId);

@@ -105,7 +105,7 @@ public class SqlStatementResourceHelper extends AbstractResourceHelper
       throw NotFound.exception("Query[%s] not found", queryId);
     }
 
-    if (MSQControllerTask.class != taskPayloadResponse.getPayload().getClass()) {
+    if (!(taskPayloadResponse.getPayload() instanceof MSQControllerTask)) {
       throw NotFound.exception("Query[%s] not found", queryId);
     }
   }

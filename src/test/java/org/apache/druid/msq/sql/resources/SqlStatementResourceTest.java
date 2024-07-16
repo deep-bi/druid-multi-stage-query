@@ -42,6 +42,7 @@ import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.java.util.common.guava.Sequences;
 import org.apache.druid.java.util.common.guava.Yielders;
 import org.apache.druid.java.util.http.client.response.StringFullResponseHolder;
+import org.apache.druid.msq.StatementResult;
 import org.apache.druid.msq.counters.ChannelCounters;
 import org.apache.druid.msq.counters.CounterSnapshots;
 import org.apache.druid.msq.counters.CounterSnapshotsTree;
@@ -57,7 +58,6 @@ import org.apache.druid.msq.indexing.report.MSQStatusReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.indexing.report.MSQTaskReportTest;
-import org.apache.druid.msq.nql.NativeStatementResult;
 import org.apache.druid.msq.sql.MSQTaskQueryMaker;
 import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.entity.ColumnNameAndTypes;
@@ -670,10 +670,8 @@ public class SqlStatementResourceTest extends MSQTestBase
 
   private static String getQueryExceptionFromResponse(Response response)
   {
-    if (response.getEntity() instanceof SqlStatementResult) {
-      return ((SqlStatementResult) response.getEntity()).getErrorResponse().getUnderlyingException().getMessage();
-    } else if (response.getEntity() instanceof NativeStatementResult) {
-      return ((NativeStatementResult) response.getEntity()).getErrorResponse().getUnderlyingException().getMessage();
+    if (response.getEntity() instanceof StatementResult) {
+      return ((StatementResult) response.getEntity()).getErrorResponse().getUnderlyingException().getMessage();
     } else {
       return ((ErrorResponse) response.getEntity()).getUnderlyingException().getMessage();
     }

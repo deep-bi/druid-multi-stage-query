@@ -16,4 +16,4 @@
     * Defines the format in which the results are presented. The following options are supported `arrayLines`,`objectLines`,`array`,`object`, and `csv`. The default is `object`.
 
 #### Example `get results` query with parameters:
-`GET https://ROUTER:8888/druid/v2/sql/statements/queryId/results?page=PAGENUMBER&resultFormat=FORMAT`
+`GET https://ROUTER:8888/druid/v2/native/statements/{queryId}/results?page=PAGENUMBER&resultFormat=FORMAT`

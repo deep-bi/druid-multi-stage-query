@@ -160,7 +160,7 @@ public class NativeStatementResourceHelper extends AbstractResourceHelper
       throw NotFound.exception("Query[%s] not found", queryId);
     }
 
-    if (MSQNativeControllerTask.class != taskPayloadResponse.getPayload().getClass()) {
+    if (!(taskPayloadResponse.getPayload() instanceof MSQNativeControllerTask)) {
       throw NotFound.exception("Query[%s] not found", queryId);
     }
   }
