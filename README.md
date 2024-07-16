@@ -17,14 +17,14 @@
   ~ under the License.
   -->
 
-# Druid Multi Stage Query extension fork
+# Druid Multi Stage Query extension with native query support
 
 Deep.bi fork of MSQ extension for apache druid, with ability to run queries from a deep storage using native druid query language.
 
 * [Native query endpoints](docs/endpoints.md)
 * [Native query example requests](docs/requests.md)
 
-# Installation
+## Installation
 
 * Preparation
   * Download provided in current repository druid-multi-stage-query-29.0.1.jar and web-console-29.0.1.jar
