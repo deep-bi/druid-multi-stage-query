@@ -31,6 +31,7 @@ Deep.bi fork of MSQ extension for apache druid, with ability to run queries from
 * Replace existing jars
   * Existing {$DRUID_HOME}/extensions/druid-multi-stage-query/druid-multi-stage-query-29.0.1.jar should be replaced with provided druid-multi-stage-query-29.0.1.jar
   * Existing {$DRUID_HOME}/lib/web-console-29.0.1.jar should be replaced with provided web-console-29.0.1.jar
+* Add `druid-multi-stage-query` to `druid.extensions.loadlist` in your `common.runtime.properties` file. For more information about how to load an extension, see [Loading extensions](https://druid.apache.org/docs/latest/configuration/extensions#loading-extensions).
 * Apply changes
   * Restart Druid
   * Empty cache and hard reload web-ui to apply changes to web-console module
