@@ -1,0 +1,115 @@
+name: Release Workflow
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build and Test Extensions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fail if branch is not allowed
+        run: |
+          if [[ ! "$GITHUB_REF" =~ ^refs/heads/release/.*$ ]]; then
+          echo "Checkstyle skipped for this branch."
+          exit 1
+          fi
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'adopt'
+          java-version: 8
+
+      - name: Build and test
+        run: |
+          mvn clean test -B
+
+  release:
+    permissions: write-all
+    needs:
+      - build-and-test
+    runs-on: ubuntu-latest
+
+    if: success()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get Version from Parent's Pom
+        id: get-version
+        run: |
+          echo "Retrieving version from parent pom"
+          version=$(grep -A 3 '<parent>' pom.xml | grep '<version>' | sed -n 's/.*<version>\(.*\)<\/version>.*/\1/p')
+          echo "Version: $version"
+          echo "content=$version" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get-version.outputs.content }}
+          release_name: Release ${{ steps.get-version.outputs.content }}
+          draft: false
+          prerelease: false
+
+      - name: Initialize sparse checkout for external repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init external-druid
+          cd external-druid
+          git remote add origin https://github.com/apache/druid.git
+          git config core.sparseCheckout true
+          echo "web-console/" >> .git/info/sparse-checkout
+          echo "licenses/" >> .git/info/sparse-checkout
+          echo "codestyle/" >> .git/info/sparse-checkout
+          echo "docs/" >> .git/info/sparse-checkout
+          git fetch --tags origin 
+          git checkout druid-${{ steps.get-version.outputs.content }}
+          mv codestyle web-console/
+          mv licenses web-console/
+
+      - name: Apply patch to web-console module
+        run: |
+          git -C external-druid apply --ignore-space-change --ignore-whitespace ../patches/web-console.patch
+
+      - name: Build patched web-console module
+        run: |
+          cd external-druid/web-console
+          mvn clean package -Dpmd.skip=true -DskipTests
+          mv target/*.jar ../../web-console-${{ steps.get-version.outputs.content }}.jar
+
+      - name: Upload patched web-console binary
+        id: upload-patched-web-console-binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./web-console-${{ steps.get-version.outputs.content }}.jar
+          asset_name: web-console-${{ steps.get-version.outputs.content }}.jar
+          asset_content_type: application/java-archive
+
+      - name: Create native MSQ artifact
+        id: create-native-msq-artifact
+        run: |
+          mvn clean package -DskipTests
+          mv /target/*.jar ./druid-multi-stage-query-${{ steps.get-version.outputs.content }}.jar 
+
+      - name: Upload native MSQ release asset
+        id: upload-native-msq-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./druid-multi-stage-query-${{ steps.get-version.outputs.content }}.jar
+          asset_name: druid-multi-stage-query-${{ steps.get-version.outputs.content }}.jar
+          asset_content_type: application/java-archive

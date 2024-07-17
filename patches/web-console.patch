@@ -1,0 +1,19 @@
+Subject: [PATCH] WEB_CONSOLE_MSQ_PATCH
+---
+Index: web-console/src/views/tasks-view/tasks-view.tsx
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/web-console/src/views/tasks-view/tasks-view.tsx b/web-console/src/views/tasks-view/tasks-view.tsx
+--- a/web-console/src/views/tasks-view/tasks-view.tsx	(revision 4af0d6fecb44fec84468fa929c3b466e66ee67ea)
++++ b/web-console/src/views/tasks-view/tasks-view.tsx	(date 1721133468673)
+@@ -331,7 +331,7 @@
+   }
+ 
+   private onTaskDetail(task: TaskQueryResultRow) {
+-    if (task.type === 'query_controller') {
++    if (task.type === 'query_controller' || task.type === 'native_query_controller') {
+       this.setState({
+         executionDialogOpen: task.task_id,
+       });

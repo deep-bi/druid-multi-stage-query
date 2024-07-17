@@ -150,7 +150,9 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
   @Override
   public void stopGracefully(TaskConfig taskConfig)
   {
-
+    if (controller != null) {
+      controller.stopGracefully();
+    }
   }
 
 }

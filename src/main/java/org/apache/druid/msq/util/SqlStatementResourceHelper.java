@@ -17,7 +17,6 @@
  * under the License.
  */
 
-
 package org.apache.druid.msq.util;
 
 import com.fasterxml.jackson.databind.ObjectMapper;

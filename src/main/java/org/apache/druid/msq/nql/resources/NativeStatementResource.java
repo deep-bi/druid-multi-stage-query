@@ -43,7 +43,6 @@ import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.AbstractStatementResource;
 import org.apache.druid.msq.guice.MultiStageQuery;
-import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.kernel.StageDefinition;
@@ -164,7 +163,7 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
     return NotFound.exception(
         "Query [%s] was not found. The query details are no longer present or might not be of the type [%s]. Verify that the id is correct.",
         queryId,
-        MSQControllerTask.TYPE
+        MSQNativeControllerTask.TYPE
     );
   }
 
