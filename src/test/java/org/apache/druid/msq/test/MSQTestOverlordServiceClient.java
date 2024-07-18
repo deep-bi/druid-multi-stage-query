@@ -26,6 +26,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import com.google.inject.Injector;
 import org.apache.druid.client.ImmutableSegmentLoadInfo;
+import org.apache.druid.client.indexing.ClientTaskQuery;
 import org.apache.druid.client.indexing.NoopOverlordClient;
 import org.apache.druid.client.indexing.TaskPayloadResponse;
 import org.apache.druid.client.indexing.TaskStatusResponse;
@@ -33,12 +34,10 @@ import org.apache.druid.indexer.TaskStatus;
 import org.apache.druid.indexer.TaskStatusPlus;
 import org.apache.druid.indexing.common.TaskReport;
 import org.apache.druid.indexing.common.actions.TaskActionClient;
+import org.apache.druid.indexing.common.task.AbstractTask;
 import org.apache.druid.java.util.common.DateTimes;
-import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.msq.exec.Controller;
-import org.apache.druid.msq.exec.ControllerImpl;
 import org.apache.druid.msq.exec.WorkerMemoryParameters;
-import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.joda.time.DateTime;
 
 import javax.annotation.Nullable;
@@ -47,22 +46,21 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class MSQTestOverlordServiceClient extends NoopOverlordClient
+public abstract class MSQTestOverlordServiceClient<TaskType extends AbstractTask & ClientTaskQuery>
+    extends NoopOverlordClient
 {
-  private final Injector injector;
-  private final ObjectMapper objectMapper;
-  private final TaskActionClient taskActionClient;
-  private final WorkerMemoryParameters workerMemoryParameters;
-  private final List<ImmutableSegmentLoadInfo> loadedSegmentMetadata;
-  private final Map<String, Controller> inMemoryControllers = new HashMap<>();
-  private final Map<String, Map<String, TaskReport>> reports = new HashMap<>();
-  private final Map<String, MSQControllerTask> inMemoryControllerTask = new HashMap<>();
-  private final Map<String, TaskStatus> inMemoryTaskStatus = new HashMap<>();
-
   public static final DateTime CREATED_TIME = DateTimes.of("2023-05-31T12:00Z");
   public static final DateTime QUEUE_INSERTION_TIME = DateTimes.of("2023-05-31T12:01Z");
-
   public static final long DURATION = 100L;
+  protected final Injector injector;
+  protected final ObjectMapper objectMapper;
+  protected final TaskActionClient taskActionClient;
+  protected final WorkerMemoryParameters workerMemoryParameters;
+  protected final List<ImmutableSegmentLoadInfo> loadedSegmentMetadata;
+  protected final Map<String, Controller> inMemoryControllers = new HashMap<>();
+  protected final Map<String, Map<String, TaskReport>> reports = new HashMap<>();
+  protected final Map<String, TaskType> inMemoryControllerTask = new HashMap<>();
+  protected final Map<String, TaskStatus> inMemoryTaskStatus = new HashMap<>();
 
   public MSQTestOverlordServiceClient(
       ObjectMapper objectMapper,
@@ -80,38 +78,7 @@ public class MSQTestOverlordServiceClient extends NoopOverlordClient
   }
 
   @Override
-  public ListenableFuture<Void> runTask(String taskId, Object taskObject)
-  {
-    ControllerImpl controller = null;
-    MSQTestControllerContext msqTestControllerContext = null;
-    try {
-      msqTestControllerContext = new MSQTestControllerContext(
-          objectMapper,
-          injector,
-          taskActionClient,
-          workerMemoryParameters,
-          loadedSegmentMetadata
-      );
-
-      MSQControllerTask cTask = objectMapper.convertValue(taskObject, MSQControllerTask.class);
-      inMemoryControllerTask.put(cTask.getId(), cTask);
-
-      controller = new ControllerImpl(cTask, msqTestControllerContext);
-
-      inMemoryControllers.put(controller.id(), controller);
-
-      inMemoryTaskStatus.put(taskId, controller.run());
-      return Futures.immediateFuture(null);
-    }
-    catch (Exception e) {
-      throw new ISE(e, "Unable to run");
-    }
-    finally {
-      if (controller != null && msqTestControllerContext != null) {
-        reports.put(controller.id(), msqTestControllerContext.getAllReports());
-      }
-    }
-  }
+  public abstract ListenableFuture<Void> runTask(String taskId, Object taskObject);
 
   @Override
   public ListenableFuture<Void> cancelTask(String taskId)
@@ -155,7 +122,7 @@ public class MSQTestOverlordServiceClient extends NoopOverlordClient
     future.set(new TaskStatusResponse(taskId, new TaskStatusPlus(
         taskId,
         null,
-        MSQControllerTask.TYPE,
+        getTaskType(),
         CREATED_TIME,
         QUEUE_INSERTION_TIME,
         taskStatus.getStatusCode(),
@@ -177,8 +144,10 @@ public class MSQTestOverlordServiceClient extends NoopOverlordClient
   }
 
   @Nullable
-  MSQControllerTask getMSQControllerTask(String id)
+  TaskType getMSQControllerTask(String id)
   {
     return inMemoryControllerTask.get(id);
   }
+
+  protected abstract String getTaskType();
 }

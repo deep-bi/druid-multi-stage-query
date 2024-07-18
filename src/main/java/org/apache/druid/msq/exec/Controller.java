@@ -23,9 +23,9 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.druid.indexer.TaskStatus;
 import org.apache.druid.indexing.common.TaskReport;
+import org.apache.druid.indexing.common.task.AbstractTask;
 import org.apache.druid.msq.counters.CounterSnapshots;
 import org.apache.druid.msq.counters.CounterSnapshotsTree;
-import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.apache.druid.msq.indexing.client.ControllerChatHandler;
 import org.apache.druid.msq.indexing.error.MSQErrorReport;
 import org.apache.druid.msq.statistics.PartialKeyStatisticsInformation;
@@ -37,7 +37,7 @@ import java.util.Map;
 /**
  * Interface for the controller of a multi-stage query.
  */
-public interface Controller
+public interface Controller<MSQTaskType extends AbstractTask>
 {
   /**
    * POJO for capturing the status of a controller task that is currently running.
@@ -67,7 +67,7 @@ public interface Controller
   /**
    * The task which this controller runs.
    */
-  MSQControllerTask task();
+  MSQTaskType task();
 
   /**
    * Runs the controller logic in the current thread. Surrounding classes provide the execution thread.

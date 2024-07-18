@@ -26,7 +26,7 @@ import org.apache.druid.error.DruidException;
 import org.apache.druid.jackson.DefaultObjectMapper;
 import org.apache.druid.msq.indexing.error.MSQException;
 import org.apache.druid.msq.indexing.error.QueryNotSupportedFault;
-import org.apache.druid.msq.sql.SqlStatementState;
+import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.resources.SqlStatementResourceTest;
 import org.junit.Assert;
 import org.junit.Test;
@@ -48,7 +48,7 @@ public class SqlStatementResultTest
 
   public static final SqlStatementResult SQL_STATEMENT_RESULT = new SqlStatementResult(
       "q1",
-      SqlStatementState.RUNNING,
+      StatementState.RUNNING,
       SqlStatementResourceTest.CREATED_TIME,
       SqlStatementResourceTest.COL_NAME_AND_TYPES,
       100L,

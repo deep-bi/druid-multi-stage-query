@@ -35,6 +35,7 @@ import org.apache.druid.msq.counters.SegmentGenerationProgressCounter;
 import org.apache.druid.msq.counters.SuperSorterProgressTrackerCounter;
 import org.apache.druid.msq.counters.WarningCounters;
 import org.apache.druid.msq.indexing.MSQControllerTask;
+import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.MSQWorkerTask;
 import org.apache.druid.msq.indexing.error.BroadcastTablesTooLargeFault;
 import org.apache.druid.msq.indexing.error.CanceledFault;
@@ -148,6 +149,7 @@ public class MSQIndexingModule implements DruidModule
         // Task classes
         MSQControllerTask.class,
         MSQWorkerTask.class,
+        MSQNativeControllerTask.class,
 
         // FrameChannelWorkerFactory and FrameChannelWorkerFactoryExtraInfoHolder classes
         SegmentGeneratorFrameProcessorFactory.class,

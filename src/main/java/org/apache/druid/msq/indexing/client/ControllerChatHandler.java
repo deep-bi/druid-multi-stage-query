@@ -21,11 +21,11 @@ package org.apache.druid.msq.indexing.client;
 
 import org.apache.druid.indexing.common.TaskReport;
 import org.apache.druid.indexing.common.TaskToolbox;
+import org.apache.druid.indexing.common.task.AbstractTask;
 import org.apache.druid.msq.counters.CounterSnapshots;
 import org.apache.druid.msq.counters.CounterSnapshotsTree;
 import org.apache.druid.msq.exec.Controller;
 import org.apache.druid.msq.exec.ControllerClient;
-import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.apache.druid.msq.indexing.MSQTaskList;
 import org.apache.druid.msq.indexing.error.MSQErrorReport;
 import org.apache.druid.msq.kernel.StageId;
@@ -50,7 +50,7 @@ import java.util.Map;
 public class ControllerChatHandler implements ChatHandler
 {
   private final Controller controller;
-  private final MSQControllerTask task;
+  private final AbstractTask task;
   private final TaskToolbox toolbox;
 
   public ControllerChatHandler(TaskToolbox toolbox, Controller controller)

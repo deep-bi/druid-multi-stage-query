@@ -17,7 +17,27 @@
   ~ under the License.
   -->
 
-# `druid-multi-stage-query` developer notes
+# Druid Multi Stage Query extension with native query support
+
+Deep.bi fork of MSQ extension for apache druid, with ability to run queries from a deep storage using native druid query language.
+
+* [Native query endpoints](docs/endpoints.md)
+* [Native query example requests](docs/requests.md)
+
+## Installation
+
+* Preparation
+  * Download provided in current repository druid-multi-stage-query-29.0.1.jar and web-console-29.0.1.jar
+* Replace existing jars
+  * Existing {$DRUID_HOME}/extensions/druid-multi-stage-query/druid-multi-stage-query-29.0.1.jar should be replaced with provided druid-multi-stage-query-29.0.1.jar
+  * Existing {$DRUID_HOME}/lib/web-console-29.0.1.jar should be replaced with provided web-console-29.0.1.jar
+* Add `druid-multi-stage-query` to `druid.extensions.loadlist` in your `common.runtime.properties` file. For more information about how to load an extension, see [Loading extensions](https://druid.apache.org/docs/latest/configuration/extensions#loading-extensions).
+* Apply changes
+  * Restart Druid
+  * Empty cache and hard reload web-ui to apply changes to web-console module
+
+
+## `druid-multi-stage-query` developer notes
 
 This document provides developer notes for the major packages of the `druid-multi-stage-query` extension. It does not
 discuss future plans; these are discussed on the list or in GitHub issues.
@@ -53,7 +73,9 @@ multi-stage queries to run as indexing service tasks.
 Main classes:
 
 - [MSQControllerTask](src/main/java/org/apache/druid/msq/indexing/MSQControllerTask.java) is a `query_controller` task.
-  Each query has one controller task. The controller task launches worker tasks to do the actual work.
+  Each sql query has one controller task. The controller task launches worker tasks to do the actual work.
+- [MSQNativeControllerTask](src/main/java/org/apache/druid/msq/indexing/MSQNativeControllerTask.java) is a `native_query_controller` task.
+  Each native query has one controller task. The controller task launches worker tasks to do the actual work.
 - [MSQWorkerTask](src/main/java/org/apache/druid/msq/indexing/MSQWorkerTask.java) is a `query_worker` task. These stick
   around for the lifetime of the query. Each task may do work for multiple stages. It has a specific worker number
   that is retained across all stages that the task may work on.
@@ -63,9 +85,9 @@ Main classes:
 Multi-stage queries, when run as SQL via query tasks, are planned in three phases:
 
 1. The SQL planner generates a native query corresponding to the user's SQL query.
-2. The `query_controller` task generates a multi-stage QueryDefinition corresponding to the native query, using
+2. The `query_controller/native_query_controller` task generates a multi-stage QueryDefinition corresponding to the native query, using
    QueryKit.
-3. The `query_controller` task determines how many workers will run and generates WorkOrders for each worker.
+3. The `query_controller/native_query_controller` task determines how many workers will run and generates WorkOrders for each worker.
 
 Once all three of these phases are complete, `query_worker` tasks are launched, sent their WorkOrders, and query
 execution begins.
@@ -94,9 +116,11 @@ Main classes:
   machine that drives execution on the controller.
 - [WorkerStageKernel](src/main/java/org/apache/druid/msq/kernel/worker/WorkerStageKernel.java) is the state machine
   that drives execution on workers.
-- [ControllerImpl](src/main/java/org/apache/druid/msq/kernel/exec/ControllerImpl.java) embeds a ControllerQueryKernel
+- [ControllerImpl](src/main/java/org/apache/druid/msq/exec/ControllerImpl.java) embeds a ControllerQueryKernel for sql queries
   and handles controller-side execution beyond the state machine, including query planning, RPC, counters, and so on.
-- [WorkerImpl](src/main/java/org/apache/druid/msq/kernel/exec/WorkerImpl.java) embeds a WorkerStageKernel and handles
+- [NativeControllerImpl](src/main/java/org/apache/druid/msq/exec/NativeControllerImpl.java) embeds a ControllerQueryKernel for native queries
+  and handles controller-side execution beyond the state machine, including query planning, RPC, counters, and so on.
+- [WorkerImpl](src/main/java/org/apache/druid/msq/exec/WorkerImpl.java) embeds a WorkerStageKernel and handles
   worker-side execution beyond the state machine, including setup of processors, channels, counters, and so on.
 
 ## Statistics
@@ -131,10 +155,22 @@ Package `org.apache.druid.msq.sql` contains code related to integration with Dru
 
 Main classes:
 
-- [SqlTaskResource](src/main/java/org/apache/druid/msq/counters/CounterTracker.java) offers the endpoint
+- [SqlTaskResource](src/main/java/org/apache/druid/msq/sql/resources/SqlStatementResource.java) offers the endpoint
   `/druid/v2/sql/task`, where SQL queries are executed as multi-stage query tasks.
 - [MSQTaskSqlEngine](src/main/java/org/apache/druid/msq/sql/MSQTaskSqlEngine.java) is a SqlEngine implementation that
   executes SQL queries as multi-stage query tasks. It is injected into the SqlTaskResource.
+- 
+## NQL
+
+Package `org.apache.druid.msq.nql` contains code related to launching native queries on MSQ engine.
+
+Main classes:
+
+- [NativeTaskResource](src/main/java/org/apache/druid/msq/nql/resources/NativeStatementResource.java) offers the endpoint
+  `/druid/v2/sql/task`, where SQL queries are executed as multi-stage query tasks.
+- [MSQNativeTaskQueryMaker](src/main/java/org/apache/druid/msq/nql/MSQNativeTaskQueryMaker.java) Creates task from the query
+  and sends it to the OverlordClient.
+
 
 ## References
 

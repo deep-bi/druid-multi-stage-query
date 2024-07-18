@@ -60,6 +60,7 @@ import org.apache.druid.guice.StartupInjectorBuilder;
 import org.apache.druid.guice.annotations.EscalatedGlobal;
 import org.apache.druid.guice.annotations.MSQ;
 import org.apache.druid.guice.annotations.Self;
+import org.apache.druid.guice.annotations.Smile;
 import org.apache.druid.hll.HyperLogLogCollector;
 import org.apache.druid.indexing.common.SegmentCacheManagerFactory;
 import org.apache.druid.indexing.common.task.CompactionTask;
@@ -305,7 +306,9 @@ public class MSQTestBase extends BaseCalciteQueryTest
   protected LocalFileStorageConnector localFileStorageConnector;
   private static final Logger log = new Logger(MSQTestBase.class);
   protected ObjectMapper objectMapper;
-  protected MSQTestOverlordServiceClient indexingServiceClient;
+  protected ObjectMapper smileMapper;
+  protected MSQSQLTestOverlordServiceClient indexingServiceClient;
+  protected MSQNativeTestOverlordServiceClient indexingNativeServiceClient;
   protected MSQTestTaskActionClient testTaskActionClient;
   protected SqlStatementFactory sqlStatementFactory;
   protected AuthorizerMapper authorizerMapper;
@@ -522,10 +525,27 @@ public class MSQTestBase extends BaseCalciteQueryTest
     objectMapper.registerModules(new StorageConnectorModule().getJacksonModules());
     objectMapper.registerModules(sqlModule.getJacksonModules());
 
+    smileMapper = setupSmileObjectMapper(injector);
+    smileMapper.registerModule(
+        new SimpleModule(StorageConnector.class.getSimpleName())
+            .registerSubtypes(
+                new NamedType(TestExportStorageConnectorProvider.class, TestExportStorageConnector.TYPE_NAME)
+            )
+    );
+    smileMapper.registerModules(new StorageConnectorModule().getJacksonModules());
+    smileMapper.registerModules(sqlModule.getJacksonModules());
+
     doReturn(mock(Request.class)).when(brokerClient).makeRequest(any(), anyString());
 
     testTaskActionClient = Mockito.spy(new MSQTestTaskActionClient(objectMapper, injector));
-    indexingServiceClient = new MSQTestOverlordServiceClient(
+    indexingServiceClient = new MSQSQLTestOverlordServiceClient(
+        objectMapper,
+        injector,
+        testTaskActionClient,
+        workerMemoryParameters,
+        loadedSegmentsMetadata
+    );
+    indexingNativeServiceClient = new MSQNativeTestOverlordServiceClient(
         objectMapper,
         injector,
         testTaskActionClient,
@@ -745,6 +765,17 @@ public class MSQTestBase extends BaseCalciteQueryTest
     DruidSecondaryModule.setupJackson(injector, mapper);
 
     mapper.registerSubtypes(new NamedType(LocalLoadSpec.class, "local"));
+
+    // This should be reusing guice instead of using static classes
+    InsertLockPreemptedFaultTest.LockPreemptedHelper.preempt(false);
+
+    return mapper;
+  }
+
+  public static ObjectMapper setupSmileObjectMapper(Injector injector)
+  {
+    ObjectMapper mapper = injector.getInstance(Key.get(ObjectMapper.class, Smile.class));
+    DruidSecondaryModule.setupJackson(injector, mapper);
 
     // This should be reusing guice instead of using static classes
     InsertLockPreemptedFaultTest.LockPreemptedHelper.preempt(false);
