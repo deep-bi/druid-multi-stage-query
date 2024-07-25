@@ -75,7 +75,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -208,12 +207,11 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
   )
   {
     if (statementState == StatementState.SUCCESS) {
-      Map<String, Object> payload =
+      MSQTaskReportPayload msqTaskReportPayload =
           AbstractResourceHelper.getPayload(contactOverlord(
               overlordClient.taskReportAsMap(queryId),
               queryId
           ));
-      MSQTaskReportPayload msqTaskReportPayload = jsonMapper.convertValue(payload, MSQTaskReportPayload.class);
       Optional<List<PageInformation>> pageList = SqlStatementResourceHelper.populatePageList(
           msqTaskReportPayload,
           msqDestination
@@ -292,8 +290,9 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
         );
       }
 
-      MSQTaskReportPayload msqTaskReportPayload = jsonMapper.convertValue(AbstractResourceHelper.getPayload(
-          contactOverlord(overlordClient.taskReportAsMap(queryId), queryId)), MSQTaskReportPayload.class);
+      MSQTaskReportPayload msqTaskReportPayload = SqlStatementResourceHelper.getPayload(
+          contactOverlord(overlordClient.taskReportAsMap(queryId), queryId)
+      );
 
       if (msqTaskReportPayload.getResults().getResultYielder() == null) {
         results = Optional.empty();
@@ -303,8 +302,9 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
 
     } else if (msqControllerTask.getQuerySpec().getDestination() instanceof DurableStorageMSQDestination) {
 
-      MSQTaskReportPayload msqTaskReportPayload = jsonMapper.convertValue(AbstractResourceHelper.getPayload(
-          contactOverlord(overlordClient.taskReportAsMap(queryId), queryId)), MSQTaskReportPayload.class);
+      MSQTaskReportPayload msqTaskReportPayload = SqlStatementResourceHelper.getPayload(
+          contactOverlord(overlordClient.taskReportAsMap(queryId), queryId)
+      );
 
       List<PageInformation> pages =
           SqlStatementResourceHelper.populatePageList(

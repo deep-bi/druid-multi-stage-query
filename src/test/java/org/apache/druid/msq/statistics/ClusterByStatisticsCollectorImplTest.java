@@ -108,7 +108,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
                   .iterator();
 
     final NavigableMap<RowKey, List<Integer>> sortedKeyWeights =
-        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator());
+        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator(SIGNATURE));
 
     doTest(
         clusterBy,
@@ -138,7 +138,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
             );
           }
 
-          verifySnapshotSerialization(testName, collector, aggregate);
+          verifySnapshotSerialization(testName, collector);
         }
     );
   }
@@ -157,7 +157,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
     }
 
     final NavigableMap<RowKey, List<Integer>> sortedKeyWeights =
-        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator());
+        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator(SIGNATURE));
 
     doTest(
         clusterBy,
@@ -187,7 +187,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
             );
           }
 
-          verifySnapshotSerialization(testName, collector, aggregate);
+          verifySnapshotSerialization(testName, collector);
         }
     );
   }
@@ -208,7 +208,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
     }
 
     final NavigableMap<RowKey, List<Integer>> sortedKeyWeights =
-        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator());
+        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator(SIGNATURE));
 
     doTest(
         clusterBy,
@@ -245,7 +245,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
             );
           }
 
-          verifySnapshotSerialization(testName, collector, aggregate);
+          verifySnapshotSerialization(testName, collector);
         }
     );
   }
@@ -267,7 +267,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
     }
 
     final NavigableMap<RowKey, List<Integer>> sortedKeyWeights =
-        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator());
+        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator(SIGNATURE));
 
     doTest(
         clusterBy,
@@ -309,7 +309,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
             }
           }
 
-          verifySnapshotSerialization(testName, collector, aggregate);
+          verifySnapshotSerialization(testName, collector);
         }
     );
   }
@@ -331,7 +331,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
     }
 
     final NavigableMap<RowKey, List<Integer>> sortedKeyWeights =
-        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator());
+        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator(SIGNATURE));
 
     doTest(
         clusterBy,
@@ -380,7 +380,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
             }
           }
 
-          verifySnapshotSerialization(testName, collector, aggregate);
+          verifySnapshotSerialization(testName, collector);
         }
     );
   }
@@ -402,7 +402,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
     }
 
     final NavigableMap<RowKey, List<Integer>> sortedKeyWeights =
-        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator());
+        computeSortedKeyWeightsFromUnweightedKeys(keys, clusterBy.keyComparator(SIGNATURE));
 
     doTest(
         clusterBy,
@@ -446,7 +446,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
             }
           }
 
-          verifySnapshotSerialization(testName, collector, aggregate);
+          verifySnapshotSerialization(testName, collector);
         }
     );
   }
@@ -551,7 +551,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
       final BiConsumer<String, ClusterByStatisticsCollectorImpl> testFn
   )
   {
-    final Comparator<RowKey> comparator = clusterBy.keyComparator();
+    final Comparator<RowKey> comparator = clusterBy.keyComparator(SIGNATURE);
 
     // Load into single collector, sorted order.
     final ClusterByStatisticsCollectorImpl sortedCollector = makeCollector(clusterBy, aggregate);
@@ -649,7 +649,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
         testName,
         partitions,
         sortedKeyWeights.firstKey(),
-        clusterBy.keyComparator()
+        clusterBy.keyComparator(SIGNATURE)
     );
     verifyPartitionWeights(testName, clusterBy, partitions, sortedKeyWeights, aggregate, expectedPartitionSize);
   }
@@ -945,21 +945,11 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
 
   private static void verifySnapshotSerialization(
       final String testName,
-      final ClusterByStatisticsCollector collector,
-      final boolean aggregate
+      final ClusterByStatisticsCollector collector
   )
   {
     try {
       final ObjectMapper jsonMapper = TestHelper.makeJsonMapper();
-      jsonMapper.registerModule(
-          new KeyCollectorSnapshotDeserializerModule(
-              KeyCollectors.makeStandardFactory(
-                  collector.getClusterBy(),
-                  aggregate
-              )
-          )
-      );
-
       final ClusterByStatisticsSnapshot snapshot = collector.snapshot();
       final ClusterByStatisticsSnapshot snapshot2 = jsonMapper.readValue(
           jsonMapper.writeValueAsString(snapshot),

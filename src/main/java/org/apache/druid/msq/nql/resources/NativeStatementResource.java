@@ -436,7 +436,8 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
           taskResponse,
           statusPlus,
           statementState,
-          contactOverlord(overlordClient.taskReportAsMap(queryId), queryId)
+          contactOverlord(overlordClient.taskReportAsMap(queryId), queryId),
+          jsonMapper
       );
     } else {
 

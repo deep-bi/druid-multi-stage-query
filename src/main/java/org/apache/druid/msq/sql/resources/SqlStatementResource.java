@@ -514,7 +514,8 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
           taskResponse,
           statusPlus,
           statementState,
-          contactOverlord(overlordClient.taskReportAsMap(queryId), queryId)
+          contactOverlord(overlordClient.taskReportAsMap(queryId), queryId),
+          jsonMapper
       );
     } else {
       Optional<List<ColumnNameAndTypes>> signature = SqlStatementResourceHelper.getSignature(msqControllerTask);

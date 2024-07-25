@@ -58,6 +58,7 @@ public class NativeMSQTestBase extends MSQTestBase
                                                                                                         .put(
                                                                                                             GroupByQuery.class,
                                                                                                             new GroupByQueryQueryToolChest(
+                                                                                                                null,
                                                                                                                 null
                                                                                                             )
                                                                                                         )

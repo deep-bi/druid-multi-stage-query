@@ -19,35 +19,65 @@
 
 package org.apache.druid.msq.util;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.druid.error.DruidException;
 import org.apache.druid.indexer.TaskLocation;
 import org.apache.druid.indexer.TaskState;
 import org.apache.druid.indexer.TaskStatusPlus;
+import org.apache.druid.indexer.report.TaskReport;
 import org.apache.druid.java.util.common.ISE;
+import org.apache.druid.java.util.common.jackson.JacksonUtils;
+import org.apache.druid.msq.indexing.error.MSQErrorReport;
+import org.apache.druid.msq.indexing.error.MSQFault;
+import org.apache.druid.msq.indexing.report.MSQTaskReport;
+import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.sql.StatementState;
 
+import javax.annotation.Nullable;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 public abstract class AbstractResourceHelper
 {
-  public static Map<String, Object> getQueryExceptionDetails(Map<String, Object> payload)
+  @Nullable
+  protected static MSQErrorReport getQueryExceptionDetails(MSQTaskReportPayload payload)
   {
-    return getMap(getMap(payload, "status"), "errorReport");
+    return payload == null ? null : payload.getStatus().getErrorReport();
   }
 
-  public static Map<String, Object> getMap(Map<String, Object> map, String key)
+  @Nullable
+  public static MSQTaskReportPayload getPayload(TaskReport.ReportMap reportMap)
   {
-    if (map == null) {
+    if (reportMap == null) {
       return null;
     }
-    return (Map<String, Object>) map.get(key);
+
+    Optional<MSQTaskReport> report = reportMap.findReport("multiStageQuery");
+    return report.map(MSQTaskReport::getPayload).orElse(null);
   }
 
-  public static Map<String, Object> getPayload(Map<String, Object> results)
+  protected static Map<String, String> buildExceptionContext(MSQFault fault, ObjectMapper mapper)
   {
-    Map<String, Object> msqReport = getMap(results, "multiStageQuery");
-    return getMap(msqReport, "payload");
-  }
+    try {
+      final Map<String, Object> msqFaultAsMap = new HashMap<>(
+          mapper.readValue(
+              mapper.writeValueAsBytes(fault),
+              JacksonUtils.TYPE_REFERENCE_MAP_STRING_OBJECT
+          )
+      );
+      msqFaultAsMap.remove("errorCode");
+      msqFaultAsMap.remove("errorMessage");
 
+      final Map<String, String> exceptionContext = new HashMap<>();
+      msqFaultAsMap.forEach((key, value) -> exceptionContext.put(key, String.valueOf(value)));
+
+      return exceptionContext;
+    }
+    catch (Exception e) {
+      throw DruidException.defensive("Could not read MSQFault[%s] as a map: [%s]", fault, e.getMessage());
+    }
+  }
 
   public static StatementState getSqlStatementState(TaskStatusPlus taskStatusPlus)
   {

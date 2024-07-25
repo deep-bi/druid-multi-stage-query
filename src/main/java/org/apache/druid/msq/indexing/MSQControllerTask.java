@@ -40,6 +40,7 @@ import org.apache.druid.indexing.common.actions.TaskActionClient;
 import org.apache.druid.indexing.common.actions.TimeChunkLockTryAcquireAction;
 import org.apache.druid.indexing.common.config.TaskConfig;
 import org.apache.druid.indexing.common.task.AbstractTask;
+import org.apache.druid.indexing.common.task.PendingSegmentAllocatingTask;
 import org.apache.druid.indexing.common.task.Tasks;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.StringUtils;
@@ -50,6 +51,7 @@ import org.apache.druid.msq.exec.ControllerImpl;
 import org.apache.druid.msq.exec.MSQTasks;
 import org.apache.druid.msq.indexing.destination.DataSourceMSQDestination;
 import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
+import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.query.QueryContext;
@@ -70,7 +72,8 @@ import java.util.Optional;
 import java.util.Set;
 
 @JsonTypeName(MSQControllerTask.TYPE)
-public class MSQControllerTask extends AbstractTask implements ClientTaskQuery, HasQuerySpec
+public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
+    PendingSegmentAllocatingTask, HasQuerySpec
 {
   public static final String TYPE = "query_controller";
   public static final String DUMMY_DATASOURCE_FOR_SELECT = "__query_select";
@@ -282,27 +285,40 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery, 
     return querySpec.getDestination().getDestinationResource();
   }
 
+  @Override
+  public String getTaskAllocatorId()
+  {
+    return getId();
+  }
+
   public static boolean isIngestion(final MSQSpec querySpec)
   {
     return querySpec.getDestination() instanceof DataSourceMSQDestination;
   }
 
+  public static boolean isExport(final MSQSpec querySpec)
+  {
+    return querySpec.getDestination() instanceof ExportMSQDestination;
+  }
+
   /**
-   * Returns true if the task reads from the same table as the destionation. In this case, we would prefer to fail
+   * Returns true if the task reads from the same table as the destination. In this case, we would prefer to fail
    * instead of reading any unused segments to ensure that old data is not read.
    */
-  public static boolean isReplaceInputDataSourceTask(MSQControllerTask task)
+  public static boolean isReplaceInputDataSourceTask(MSQSpec querySpec)
   {
-    return task.getQuerySpec()
-               .getQuery()
-               .getDataSource()
-               .getTableNames()
-               .stream()
-               .anyMatch(datasouce -> task.getDataSource().equals(datasouce));
+    if (isIngestion(querySpec)) {
+      final String targetDataSource = ((DataSourceMSQDestination) querySpec.getDestination()).getDataSource();
+      final Set<String> sourceTableNames = querySpec.getQuery().getDataSource().getTableNames();
+      return sourceTableNames.contains(targetDataSource);
+    } else {
+      return false;
+    }
   }
 
   public static boolean writeResultsToDurableStorage(final MSQSpec querySpec)
   {
     return querySpec.getDestination() instanceof DurableStorageMSQDestination;
   }
+
 }

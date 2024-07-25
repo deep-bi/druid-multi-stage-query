@@ -19,6 +19,7 @@
 
 package org.apache.druid.msq.util;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.druid.client.indexing.TaskPayloadResponse;
 import org.apache.druid.client.indexing.TaskStatusResponse;
 import org.apache.druid.error.DruidException;
@@ -26,9 +27,12 @@ import org.apache.druid.error.NotFound;
 import org.apache.druid.frame.Frame;
 import org.apache.druid.frame.processor.FrameProcessors;
 import org.apache.druid.indexer.TaskStatusPlus;
+import org.apache.druid.indexer.report.TaskReport;
 import org.apache.druid.java.util.common.guava.Sequence;
 import org.apache.druid.java.util.common.guava.Sequences;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
+import org.apache.druid.msq.indexing.error.MSQErrorReport;
+import org.apache.druid.msq.indexing.error.MSQFault;
 import org.apache.druid.msq.kernel.StageDefinition;
 import org.apache.druid.msq.nql.NativeStatementResult;
 import org.apache.druid.msq.sql.StatementState;
@@ -39,7 +43,6 @@ import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
 
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -64,12 +67,13 @@ public class NativeStatementResourceHelper extends AbstractResourceHelper
       TaskStatusResponse taskResponse,
       TaskStatusPlus statusPlus,
       StatementState statementState,
-      Map<String, Object> msqPayload
+      TaskReport.ReportMap msqPayload,
+      ObjectMapper jsonMapper
   )
   {
-    Map<String, Object> exceptionDetails = getQueryExceptionDetails(getPayload(msqPayload));
-    Map<String, Object> exception = getMap(exceptionDetails, "error");
-    if (exceptionDetails == null || exception == null) {
+    final MSQErrorReport exceptionDetails = getQueryExceptionDetails(getPayload(msqPayload));
+    final MSQFault fault = exceptionDetails == null ? null : exceptionDetails.getFault();
+    if (exceptionDetails == null || fault == null) {
       return Optional.of(new NativeStatementResult(
           queryId,
           statementState,
@@ -79,18 +83,15 @@ public class NativeStatementResourceHelper extends AbstractResourceHelper
           null,
           DruidException.forPersona(DruidException.Persona.DEVELOPER)
                         .ofCategory(DruidException.Category.UNCATEGORIZED)
-                        .build("%s", taskResponse.getStatus().getErrorMsg()).toErrorResponse()
+                        .build("%s", taskResponse.getStatus().getErrorMsg())
+                        .toErrorResponse()
       ));
     }
 
-    final String errorMessage = String.valueOf(exception.getOrDefault("errorMessage", statusPlus.getErrorMsg()));
-    exception.remove("errorMessage");
-    String errorCode = String.valueOf(exception.getOrDefault("errorCode", "unknown"));
-    exception.remove("errorCode");
-    Map<String, String> stringException = new HashMap<>();
-    for (Map.Entry<String, Object> exceptionKeys : exception.entrySet()) {
-      stringException.put(exceptionKeys.getKey(), String.valueOf(exceptionKeys.getValue()));
-    }
+    final String errorMessage = fault.getErrorMessage() == null ? statusPlus.getErrorMsg() : fault.getErrorMessage();
+    final String errorCode = fault.getErrorCode() == null ? "unknown" : fault.getErrorCode();
+
+    final Map<String, String> exceptionContext = buildExceptionContext(fault, jsonMapper);
     return Optional.of(new NativeStatementResult(
         queryId,
         statementState,
@@ -106,7 +107,7 @@ public class NativeStatementResourceHelper extends AbstractResourceHelper
             DruidException ex = bob.forPersona(DruidException.Persona.USER)
                                    .ofCategory(DruidException.Category.UNCATEGORIZED)
                                    .build(errorMessage);
-            ex.withContext(stringException);
+            ex.withContext(exceptionContext);
             return ex;
           }
         }).toErrorResponse()

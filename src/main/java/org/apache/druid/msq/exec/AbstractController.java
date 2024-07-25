@@ -19,7 +19,6 @@
 
 package org.apache.druid.msq.exec;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -48,13 +47,15 @@ import org.apache.druid.frame.key.KeyOrder;
 import org.apache.druid.frame.key.RowKey;
 import org.apache.druid.frame.key.RowKeyReader;
 import org.apache.druid.frame.util.DurableStorageUtils;
+import org.apache.druid.frame.write.InvalidFieldException;
 import org.apache.druid.frame.write.InvalidNullByteException;
 import org.apache.druid.indexer.TaskState;
 import org.apache.druid.indexer.TaskStatus;
+import org.apache.druid.indexer.report.TaskContextReport;
+import org.apache.druid.indexer.report.TaskReport;
 import org.apache.druid.indexing.common.LockGranularity;
 import org.apache.druid.indexing.common.TaskLock;
 import org.apache.druid.indexing.common.TaskLockType;
-import org.apache.druid.indexing.common.TaskReport;
 import org.apache.druid.indexing.common.actions.LockListAction;
 import org.apache.druid.indexing.common.actions.LockReleaseAction;
 import org.apache.druid.indexing.common.actions.RetrieveUsedSegmentsAction;
@@ -84,6 +85,7 @@ import org.apache.druid.msq.indexing.error.InsertCannotAllocateSegmentFault;
 import org.apache.druid.msq.indexing.error.InsertCannotBeEmptyFault;
 import org.apache.druid.msq.indexing.error.InsertLockPreemptedFault;
 import org.apache.druid.msq.indexing.error.InsertTimeOutOfBoundsFault;
+import org.apache.druid.msq.indexing.error.InvalidFieldFault;
 import org.apache.druid.msq.indexing.error.InvalidNullByteFault;
 import org.apache.druid.msq.indexing.error.MSQErrorReport;
 import org.apache.druid.msq.indexing.error.MSQException;
@@ -95,6 +97,7 @@ import org.apache.druid.msq.indexing.error.UnknownFault;
 import org.apache.druid.msq.indexing.error.WorkerRpcFailedFault;
 import org.apache.druid.msq.indexing.processor.SegmentGeneratorFrameProcessorFactory;
 import org.apache.druid.msq.indexing.report.MSQResultsReport;
+import org.apache.druid.msq.indexing.report.MSQSegmentReport;
 import org.apache.druid.msq.indexing.report.MSQStagesReport;
 import org.apache.druid.msq.indexing.report.MSQStatusReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReport;
@@ -117,7 +120,6 @@ import org.apache.druid.msq.input.table.DataSegmentWithLocation;
 import org.apache.druid.msq.input.table.TableInputSpec;
 import org.apache.druid.msq.input.table.TableInputSpecSlicer;
 import org.apache.druid.msq.kernel.QueryDefinition;
-import org.apache.druid.msq.kernel.StageDefinition;
 import org.apache.druid.msq.kernel.StageId;
 import org.apache.druid.msq.kernel.WorkOrder;
 import org.apache.druid.msq.kernel.controller.ControllerQueryKernel;
@@ -127,6 +129,7 @@ import org.apache.druid.msq.querykit.DataSegmentTimelineView;
 import org.apache.druid.msq.querykit.MultiQueryKit;
 import org.apache.druid.msq.querykit.QueryKit;
 import org.apache.druid.msq.querykit.QueryKitUtils;
+import org.apache.druid.msq.querykit.WindowOperatorQueryKit;
 import org.apache.druid.msq.querykit.groupby.GroupByQueryKit;
 import org.apache.druid.msq.querykit.scan.ScanQueryKit;
 import org.apache.druid.msq.statistics.PartialKeyStatisticsInformation;
@@ -136,6 +139,7 @@ import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.groupby.GroupByQuery;
+import org.apache.druid.query.operator.WindowOperatorQuery;
 import org.apache.druid.query.scan.ScanQuery;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
@@ -209,6 +213,8 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
   protected WorkerMemoryParameters workerMemoryParameters;
   protected volatile WorkerClient netClient;
   protected Map<Integer, ClusterStatisticsMergeMode> stageToStatsMergingMode;
+  @Nullable
+  private MSQSegmentReport segmentReport;
 
 
   public AbstractController(
@@ -234,7 +240,8 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
       @Nullable final DateTime queryStartTime,
       final long queryDuration,
       MSQWorkerTaskLauncher taskLauncher,
-      final SegmentLoadStatusFetcher segmentLoadWaiter
+      final SegmentLoadStatusFetcher segmentLoadWaiter,
+      @Nullable MSQSegmentReport msqSegmentReport
   )
   {
     int pendingTasks = -1;
@@ -261,7 +268,8 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
         workerStatsMap,
         pendingTasks,
         runningTasks,
-        status
+        status,
+        msqSegmentReport
     );
   }
 
@@ -394,19 +402,30 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
    * Compute shard columns for {@link DimensionRangeShardSpec}. Returns an empty list if range-based sharding
    * is not applicable.
    */
-  private static List<String> computeShardColumns(
+  private static Pair<List<String>, String> computeShardColumns(
       final RowSignature signature,
       final ClusterBy clusterBy,
-      final ColumnMappings columnMappings
+      final ColumnMappings columnMappings,
+      boolean mayHaveMultiValuedClusterByFields
   )
   {
+    if (mayHaveMultiValuedClusterByFields) {
+      // DimensionRangeShardSpec cannot handle multivalued fields.
+      return Pair.of(
+          Collections.emptyList(),
+          "Cannot use RangeShardSpec, the fields in the CLUSTERED BY clause contains multivalued fields. Using NumberedShardSpec instead."
+      );
+    }
     final List<KeyColumn> clusterByColumns = clusterBy.getColumns();
     final List<String> shardColumns = new ArrayList<>();
     final boolean boosted = isClusterByBoosted(clusterBy);
     final int numShardColumns = clusterByColumns.size() - clusterBy.getBucketByCount() - (boosted ? 1 : 0);
 
     if (numShardColumns == 0) {
-      return Collections.emptyList();
+      return Pair.of(
+          Collections.emptyList(),
+          "Using NumberedShardSpec as no columns are supplied in the 'CLUSTERED BY' clause."
+      );
     }
 
     for (int i = clusterBy.getBucketByCount(); i < clusterBy.getBucketByCount() + numShardColumns; i++) {
@@ -415,25 +434,37 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
 
       // DimensionRangeShardSpec only handles ascending order.
       if (column.order() != KeyOrder.ASCENDING) {
-        return Collections.emptyList();
+        return Pair.of(
+            Collections.emptyList(),
+            "Cannot use RangeShardSpec, RangedShardSpec only supports ascending CLUSTER BY keys. Using NumberedShardSpec instead."
+        );
       }
 
       ColumnType columnType = signature.getColumnType(column.columnName()).orElse(null);
 
       // DimensionRangeShardSpec only handles strings.
       if (!(ColumnType.STRING.equals(columnType))) {
-        return Collections.emptyList();
+        return Pair.of(
+            Collections.emptyList(),
+            "Cannot use RangeShardSpec, RangedShardSpec only supports string CLUSTER BY keys. Using NumberedShardSpec instead."
+        );
       }
 
       // DimensionRangeShardSpec only handles columns that appear as-is in the output.
       if (outputColumns.isEmpty()) {
-        return Collections.emptyList();
+        return Pair.of(
+            Collections.emptyList(),
+            StringUtils.format(
+                "Cannot use RangeShardSpec, Could not find output column name for column [%s]. Using NumberedShardSpec instead.",
+                column.columnName()
+            )
+        );
       }
 
       shardColumns.add(columnMappings.getOutputColumnName(outputColumns.getInt(0)));
     }
 
-    return shardColumns;
+    return Pair.of(shardColumns, "Using RangeShardSpec to generate segments.");
   }
 
   /**
@@ -585,6 +616,20 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
                                     .build(),
             task.getQuerySpec().getColumnMappings()
         );
+      } else if (workerErrorReport.getFault() instanceof InvalidFieldFault) {
+        InvalidFieldFault iff = (InvalidFieldFault) workerErrorReport.getFault();
+        return MSQErrorReport.fromException(
+            workerErrorReport.getTaskId(),
+            workerErrorReport.getHost(),
+            workerErrorReport.getStageNumber(),
+            InvalidFieldException.builder()
+                                 .source(iff.getSource())
+                                 .rowNumber(iff.getRowNumber())
+                                 .column(iff.getColumn())
+                                 .errorMsg(iff.getErrorMsg())
+                                 .build(),
+            task.getQuerySpec().getColumnMappings()
+        );
       } else {
         return workerErrorReport;
       }
@@ -598,6 +643,7 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
         ImmutableMap.<Class<? extends Query>, QueryKit>builder()
                     .put(ScanQuery.class, new ScanQueryKit(context.jsonMapper()))
                     .put(GroupByQuery.class, new GroupByQueryKit(context.jsonMapper()))
+                    .put(WindowOperatorQuery.class, new WindowOperatorQueryKit(context.jsonMapper()))
                     .build();
 
     return new MultiQueryKit(kitMap);
@@ -618,18 +664,10 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
     addToKernelManipulationQueue(
         queryKernel -> {
           final StageId stageId = queryKernel.getStageId(stageNumber);
-
-          // We need a specially-decorated ObjectMapper to deserialize key statistics.
-          final StageDefinition stageDef = queryKernel.getStageDefinition(stageId);
-          final ObjectMapper mapper = MSQTasks.decorateObjectMapperForKeyCollectorSnapshot(
-              context.jsonMapper(),
-              stageDef.getShuffleSpec().clusterBy(),
-              stageDef.getShuffleSpec().doesAggregate()
-          );
-
           final PartialKeyStatisticsInformation partialKeyStatisticsInformation;
+
           try {
-            partialKeyStatisticsInformation = mapper.convertValue(
+            partialKeyStatisticsInformation = context.jsonMapper().convertValue(
                 partialKeyStatisticsInformationObject,
                 PartialKeyStatisticsInformation.class
             );
@@ -858,7 +896,7 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
 
   @Override
   @Nullable
-  public Map<String, TaskReport> liveReports()
+  public TaskReport.ReportMap liveReports()
   {
     final QueryDefinition queryDef = queryDefRef.get();
 
@@ -880,7 +918,8 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
                         DateTimes.nowUtc()
                     ).toDurationMillis(),
                     workerTaskLauncher,
-                    segmentLoadWaiter
+                    segmentLoadWaiter,
+                    segmentReport
                 ),
                 makeStageReport(
                     queryDef,
@@ -1075,7 +1114,8 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
               queryStartTime,
               new Interval(queryStartTime, DateTimes.nowUtc()).toDurationMillis(),
               workerTaskLauncher,
-              segmentLoadWaiter
+              segmentLoadWaiter,
+              segmentReport
           ),
           stagesReport,
           countersSnapshot,
@@ -1084,7 +1124,10 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
 
       context.writeReports(
           id(),
-          TaskReport.buildTaskReports(new MSQTaskReport(id(), taskReportPayload))
+          TaskReport.buildTaskReports(
+              new MSQTaskReport(id(), taskReportPayload),
+              new TaskContextReport(id(), task.getContext())
+          )
       );
     }
     catch (Throwable e) {
@@ -1334,12 +1377,16 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
     final SegmentIdWithShardSpec[] retVal = new SegmentIdWithShardSpec[partitionBoundaries.size()];
     final Granularity segmentGranularity = destination.getSegmentGranularity();
     final List<String> shardColumns;
+    final Pair<List<String>, String> shardReasonPair;
 
-    if (mayHaveMultiValuedClusterByFields) {
-      // DimensionRangeShardSpec cannot handle multi-valued fields.
-      shardColumns = Collections.emptyList();
+    shardReasonPair = computeShardColumns(signature, clusterBy, task.getQuerySpec().getColumnMappings(), mayHaveMultiValuedClusterByFields);
+    shardColumns = shardReasonPair.lhs;
+    String reason = shardReasonPair.rhs;
+    log.info(StringUtils.format("ShardSpec chosen: %s", reason));
+    if (shardColumns.isEmpty()) {
+      segmentReport = new MSQSegmentReport(NumberedShardSpec.class.getSimpleName(), reason);
     } else {
-      shardColumns = computeShardColumns(signature, clusterBy, task.getQuerySpec().getColumnMappings());
+      segmentReport = new MSQSegmentReport(DimensionRangeShardSpec.class.getSimpleName(), reason);
     }
 
     // Group partition ranges by bucket (time chunk), so we can generate shardSpecs for each bucket independently.
@@ -1453,6 +1500,11 @@ public abstract class AbstractController<TaskType extends AbstractTask & HasQuer
     final Granularity segmentGranularity = destination.getSegmentGranularity();
 
     String previousSegmentId = null;
+
+    segmentReport = new MSQSegmentReport(
+        NumberedShardSpec.class.getSimpleName(),
+        "Using NumberedShardSpec to generate segments since the query is inserting rows."
+    );
 
     for (ClusterByPartition partitionBoundary : partitionBoundaries) {
       final DateTime timestamp = getBucketDateTime(partitionBoundary, segmentGranularity, keyReader);

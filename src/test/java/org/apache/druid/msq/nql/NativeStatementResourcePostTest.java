@@ -29,7 +29,6 @@ import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.entity.PageInformation;
 import org.apache.druid.msq.sql.entity.ResultSetInformation;
 import org.apache.druid.msq.sql.resources.SqlStatementResourceTest;
-import org.apache.druid.msq.test.MSQTestFileUtils;
 import org.apache.druid.msq.test.MSQTestOverlordServiceClient;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.server.mocks.MockHttpServletRequest;
@@ -37,9 +36,9 @@ import org.apache.druid.server.security.AuthConfig;
 import org.apache.druid.server.security.AuthenticationResult;
 import org.apache.druid.sql.http.ResultFormat;
 import org.apache.druid.storage.NilStorageConnector;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import javax.ws.rs.core.Response;
 import java.io.ByteArrayInputStream;
@@ -240,7 +239,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
 
   private NativeStatementResource resource;
 
-  @Before
+  @BeforeEach
   public void init()
   {
     resource = new NativeStatementResource(
@@ -274,7 +273,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     testServletRequest.setAttribute(AuthConfig.DRUID_AUTHENTICATION_RESULT, AUTHENTICATION_RESULT);
     testServletRequest.contentType = CONTENT_TYPE_JSON;
     Response response = doPost(SIMPLE_SCAN_QUERY, testServletRequest);
-    Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
     String taskId = ((NativeStatementResult) response.getEntity()).getQueryId();
 
     NativeStatementResult expected = new NativeStatementResult(taskId, StatementState.SUCCESS,
@@ -291,7 +290,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                                ),
                                                                null
     );
-    Assert.assertEquals(
+    Assertions.assertEquals(
         objectMapper.writeValueAsString(expected),
         objectMapper.writeValueAsString(response.getEntity())
     );
@@ -310,7 +309,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     testServletRequest.setAttribute(AuthConfig.DRUID_AUTHENTICATION_RESULT, AUTHENTICATION_RESULT);
     testServletRequest.contentType = CONTENT_TYPE_JSON;
     Response response = doPost(SIMPLE_GROUP_BY_QUERY, testServletRequest);
-    Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
     String taskId = ((NativeStatementResult) response.getEntity()).getQueryId();
 
     NativeStatementResult expected = new NativeStatementResult(taskId, StatementState.SUCCESS,
@@ -327,7 +326,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                                ),
                                                                null
     );
-    Assert.assertEquals(
+    Assertions.assertEquals(
         objectMapper.writeValueAsString(expected),
         objectMapper.writeValueAsString(response.getEntity())
     );
@@ -375,7 +374,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     ).getEntity();
 
 
-    Assert.assertEquals(ImmutableList.of(
+    Assertions.assertEquals(ImmutableList.of(
         new PageInformation(0, 2L, 120L, 0, 0),
         new PageInformation(1, 2L, 118L, 0, 1),
         new PageInformation(2, 2L, 122L, 0, 2)
@@ -429,7 +428,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
   public void testMultipleWorkersWithPageSizeLimiting() throws IOException
   {
 
-    final File toRead = MSQTestFileUtils.getResourceAsTemporaryFile(temporaryFolder, this, "/wikipedia-sampled.json");
+    final File toRead = getResourceAsTemporaryFile("/wikipedia-sampled.json");
     final String toReadAsJson = toRead.getAbsolutePath();
 
     MockHttpServletRequest testServletRequest = new MockHttpServletRequest();
@@ -444,7 +443,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
         toReadAsJson
     ), testServletRequest).getEntity();
 
-    Assert.assertEquals(ImmutableList.of(
+    Assertions.assertEquals(ImmutableList.of(
         new PageInformation(0, 2L, 128L, 0, 0),
         new PageInformation(1, 2L, 132L, 1, 1),
         new PageInformation(2, 2L, 128L, 0, 2),
@@ -465,47 +464,62 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     rows.add(ImmutableList.of(1466985600000L, "GiftBot"));
     rows.add(ImmutableList.of(1466985600000L, "GiftBot"));
 
-    Assert.assertEquals(rows, SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
+    Assertions.assertEquals(rows, SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
         response.getQueryId(),
         null,
         ResultFormat.ARRAY.name(),
         SqlStatementResourceTest.makeOkRequest()
     )));
 
-    Assert.assertEquals(rows.subList(0, 2), SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
-        response.getQueryId(),
-        0L,
-        ResultFormat.ARRAY.name(),
-        SqlStatementResourceTest.makeOkRequest()
-    )));
+    Assertions.assertEquals(
+        rows.subList(0, 2),
+        SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
+            response.getQueryId(),
+            0L,
+            ResultFormat.ARRAY.name(),
+            SqlStatementResourceTest.makeOkRequest()
+        ))
+    );
 
-    Assert.assertEquals(rows.subList(2, 4), SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
-        response.getQueryId(),
-        1L,
-        ResultFormat.ARRAY.name(),
-        SqlStatementResourceTest.makeOkRequest()
-    )));
+    Assertions.assertEquals(
+        rows.subList(2, 4),
+        SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
+            response.getQueryId(),
+            1L,
+            ResultFormat.ARRAY.name(),
+            SqlStatementResourceTest.makeOkRequest()
+        ))
+    );
 
-    Assert.assertEquals(rows.subList(4, 6), SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
-        response.getQueryId(),
-        2L,
-        ResultFormat.ARRAY.name(),
-        SqlStatementResourceTest.makeOkRequest()
-    )));
+    Assertions.assertEquals(
+        rows.subList(4, 6),
+        SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
+            response.getQueryId(),
+            2L,
+            ResultFormat.ARRAY.name(),
+            SqlStatementResourceTest.makeOkRequest()
+        ))
+    );
 
-    Assert.assertEquals(rows.subList(6, 8), SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
-        response.getQueryId(),
-        3L,
-        ResultFormat.ARRAY.name(),
-        SqlStatementResourceTest.makeOkRequest()
-    )));
+    Assertions.assertEquals(
+        rows.subList(6, 8),
+        SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
+            response.getQueryId(),
+            3L,
+            ResultFormat.ARRAY.name(),
+            SqlStatementResourceTest.makeOkRequest()
+        ))
+    );
 
-    Assert.assertEquals(rows.subList(8, 10), SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
-        response.getQueryId(),
-        4L,
-        ResultFormat.ARRAY.name(),
-        SqlStatementResourceTest.makeOkRequest()
-    )));
+    Assertions.assertEquals(
+        rows.subList(8, 10),
+        SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
+            response.getQueryId(),
+            4L,
+            ResultFormat.ARRAY.name(),
+            SqlStatementResourceTest.makeOkRequest()
+        ))
+    );
   }
 
   @Test
@@ -529,14 +543,14 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     rows.add(ImmutableList.of(1, "def"));
     rows.add(ImmutableList.of(1, "abc"));
 
-    Assert.assertEquals(rows, SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
+    Assertions.assertEquals(rows, SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
         response.getQueryId(),
         null,
         ResultFormat.ARRAY.name(),
         SqlStatementResourceTest.makeOkRequest()
     )));
 
-    Assert.assertEquals(rows, SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
+    Assertions.assertEquals(rows, SqlStatementResourceTest.getResultRowsFromResponse(resource.doGetResults(
         response.getQueryId(),
         0L,
         ResultFormat.ARRAY.name(),
@@ -566,7 +580,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
       throws IOException
   {
     byte[] bytes = responseToByteArray(resultsResponse, objectMapper);
-    Assert.assertEquals(expectedResult, new String(bytes, StandardCharsets.UTF_8));
+    Assertions.assertEquals(expectedResult, new String(bytes, StandardCharsets.UTF_8));
   }
 
 }

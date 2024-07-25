@@ -74,6 +74,7 @@ import org.apache.druid.msq.shuffle.input.WorkerInputChannelFactory;
 import org.apache.druid.msq.util.ControllerUtil;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.msq.util.NativeStatementResourceHelper;
+import org.apache.druid.query.DruidMetrics;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
@@ -85,6 +86,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -125,8 +127,9 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
     final ShuffleSpecFactory shuffleSpecFactory;
 
     shuffleSpecFactory = querySpec.getDestination()
-                                  .getShuffleSpecFactory(MultiStageQueryContext.getRowsPerPage(querySpec.getQuery()
-                                                                                                        .context()));
+                                  .getShuffleSpecFactory(
+                                      MultiStageQueryContext.getRowsPerPage(querySpec.getQuery().context())
+                                  );
     queryToPlan = querySpec.getQuery();
 
 
@@ -150,7 +153,7 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
       throw new MSQException(e, QueryNotSupportedFault.INSTANCE);
     }
 
-    if (querySpec.getDestination() instanceof ExportMSQDestination) {
+    if (MSQControllerTask.isExport(querySpec)) {
       final ExportMSQDestination exportMSQDestination = (ExportMSQDestination) querySpec.getDestination();
       final ExportStorageProvider exportStorageProvider = exportMSQDestination.getExportStorageProvider();
 
@@ -283,6 +286,8 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
       queryKernel = Preconditions.checkNotNull(queryRunResult.lhs);
       workerTaskRunnerFuture = Preconditions.checkNotNull(queryRunResult.rhs);
       resultsYielder = getFinalResultsYielder(queryDef, queryKernel, task.getQuerySpec().getColumnMappings());
+
+      handleQueryResults(queryDef, queryKernel);
 
     }
     catch (Throwable e) {
@@ -458,6 +463,11 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
 
     }
 
+    // propagate the controller's tags to the worker task for enhanced metrics reporting
+    Map<String, Object> tags = task.getContextValue(DruidMetrics.TAGS);
+    if (tags != null) {
+      taskContextOverridesBuilder.put(DruidMetrics.TAGS, tags);
+    }
 
     this.workerTaskLauncher = new MSQWorkerTaskLauncher(
         id(),
@@ -501,5 +511,32 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
     return queryDef;
   }
 
+  private void handleQueryResults(
+      final QueryDefinition queryDef,
+      final ControllerQueryKernel queryKernel
+  ) throws IOException
+  {
+    if (!queryKernel.isSuccess()) {
+      return;
+    }
+    if (MSQControllerTask.isExport(task.getQuerySpec())) {
+      // Write manifest file.
+      ExportMSQDestination destination = (ExportMSQDestination) task.getQuerySpec().getDestination();
+      ExportMetadataManager exportMetadataManager = new ExportMetadataManager(destination.getExportStorageProvider());
 
+      final StageId finalStageId = queryKernel.getStageId(queryDef.getFinalStageDefinition().getStageNumber());
+      //noinspection unchecked
+
+      Object resultObjectForStage = queryKernel.getResultObjectForStage(finalStageId);
+      if (!(resultObjectForStage instanceof List)) {
+        // This might occur if all workers are running on an older version. We are not able to write a manifest file in this case.
+        log.warn("Was unable to create manifest file due to ");
+        return;
+      }
+      @SuppressWarnings("unchecked")
+      List<String> exportedFiles = (List<String>) queryKernel.getResultObjectForStage(finalStageId);
+      log.info("Query [%s] exported %d files.", queryDef.getQueryId(), exportedFiles.size());
+      exportMetadataManager.writeMetadata(exportedFiles);
+    }
+  }
 }
