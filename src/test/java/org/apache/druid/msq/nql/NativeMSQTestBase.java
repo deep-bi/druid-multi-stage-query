@@ -37,6 +37,8 @@ import org.apache.druid.query.groupby.GroupByQueryQueryToolChest;
 import org.apache.druid.query.scan.ScanQuery;
 import org.apache.druid.query.scan.ScanQueryConfig;
 import org.apache.druid.query.scan.ScanQueryQueryToolChest;
+import org.apache.druid.query.timeseries.TimeseriesQuery;
+import org.apache.druid.query.timeseries.TimeseriesQueryQueryToolChest;
 import org.apache.druid.server.QueryLifecycleFactory;
 import org.apache.druid.server.log.TestRequestLogger;
 import org.apache.druid.server.metrics.NoopServiceEmitter;
@@ -60,6 +62,12 @@ public class NativeMSQTestBase extends MSQTestBase
                                                                                                             new GroupByQueryQueryToolChest(
                                                                                                                 null,
                                                                                                                 null
+                                                                                                            )
+                                                                                                        )
+                                                                                                        // Added timeseries toolchest to test unsupported query exception
+                                                                                                        .put(
+                                                                                                            TimeseriesQuery.class,
+                                                                                                            new TimeseriesQueryQueryToolChest(
                                                                                                             )
                                                                                                         )
                                                                                                         .build());

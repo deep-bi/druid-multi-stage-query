@@ -150,7 +150,7 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
       throw e;
     }
     catch (Exception e) {
-      throw new MSQException(e, QueryNotSupportedFault.INSTANCE);
+      throw new MSQException(e, QueryNotSupportedFault.builder().withErrorMessage(e.getMessage()).build());
     }
 
     if (MSQControllerTask.isExport(querySpec)) {
