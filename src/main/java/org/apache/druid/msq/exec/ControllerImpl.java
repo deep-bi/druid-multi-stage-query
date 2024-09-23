@@ -564,7 +564,7 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       throw e;
     }
     catch (Exception e) {
-      throw new MSQException(e, QueryNotSupportedFault.INSTANCE);
+      throw new MSQException(e, QueryNotSupportedFault.builder().withErrorMessage(e.getMessage()).build());
     }
 
     if (MSQControllerTask.isIngestion(querySpec)) {

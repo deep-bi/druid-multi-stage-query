@@ -22,6 +22,8 @@ package org.apache.druid.msq.indexing.error;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonTypeName;
 
+import javax.annotation.Nullable;
+
 @JsonTypeName(QueryNotSupportedFault.CODE)
 public class QueryNotSupportedFault extends BaseMSQFault
 {
@@ -33,9 +35,36 @@ public class QueryNotSupportedFault extends BaseMSQFault
     super(CODE);
   }
 
+  private QueryNotSupportedFault(@Nullable String errorMessage)
+  {
+    super(CODE, errorMessage);
+  }
+
+  public static Builder builder()
+  {
+    return new Builder();
+  }
+
   @JsonCreator
   public static QueryNotSupportedFault instance()
   {
     return INSTANCE;
+  }
+
+  public static class Builder
+  {
+    @Nullable
+    private String errorMessage;
+
+    public Builder withErrorMessage(@Nullable String errorMessage)
+    {
+      this.errorMessage = errorMessage;
+      return this;
+    }
+
+    public QueryNotSupportedFault build()
+    {
+      return new QueryNotSupportedFault(errorMessage);
+    }
   }
 }

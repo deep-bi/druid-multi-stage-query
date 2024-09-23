@@ -23,7 +23,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import org.apache.druid.error.DruidException;
 import org.apache.druid.msq.indexing.MSQControllerTask;
+import org.apache.druid.msq.indexing.error.QueryNotSupportedFault;
 import org.apache.druid.msq.nql.resources.NativeStatementResource;
 import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.entity.PageInformation;
@@ -50,6 +52,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.apache.druid.msq.sql.resources.SqlMSQStatementResourcePostTest.responseToByteArray;
 
@@ -224,11 +227,26 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                            + "    \"type\": \"all\"\n"
                                                            + "  }\n"
                                                            + "}";
+
+  private static final String SIMPLE_TIMESERIES = "{\n"
+                                                  + "    \"queryType\": \"timeseries\",\n"
+                                                  + "    \"dataSource\": \"foo\",\n"
+                                                  + "    \"granularity\": \"hour\",\n"
+                                                  + "    \"intervals\": [\n"
+                                                  + "      \"-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z\"\n"
+                                                  + "    ],\n"
+                                                  + "    \"context\":\n"
+                                                  + "      {\n"
+                                                  + "        \"__user\": \"allowAll\",\n"
+                                                  + "        \"executionMode\": \"ASYNC\"\n"
+                                                  + "      }\n"
+                                                  + "}";
   private static final String DURABLE_STORAGE_UNAVAILABLE_MESSAGE =
       "The native statement api cannot read from the select destination [durableStorage] provided in "
       + "the query context [selectDestination] since it is not configured on the broker. It is recommended to "
       + "configure durable storage as it allows the user to fetch large result sets. "
       + "Please contact your cluster admin to configure durable storage.";
+  private static final String TIMESERIES_NOT_SUPPORTED_MSG = "Unsupported query class [org.apache.druid.query.timeseries.TimeseriesQuery]";
   private static final Map<String, ColumnType> ROW_SIGNATURE = ImmutableMap.of("count",
                                                                                ColumnType.LONG, "dim",
                                                                                ColumnType.LONG
@@ -556,6 +574,21 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
         ResultFormat.ARRAY.name(),
         SqlStatementResourceTest.makeOkRequest()
     )));
+  }
+
+  @Test
+  public void testQueryNotSupported()
+  {
+    MockHttpServletRequest testServletRequest = new MockHttpServletRequest();
+
+    testServletRequest.setAttribute(AuthConfig.DRUID_AUTHENTICATION_RESULT, AUTHENTICATION_RESULT);
+    testServletRequest.contentType = CONTENT_TYPE_JSON;
+    Response response = doPost(SIMPLE_TIMESERIES, testServletRequest);
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    DruidException exception = Objects.requireNonNull(((NativeStatementResult) response.getEntity()).getErrorResponse())
+                                      .getUnderlyingException();
+    Assertions.assertEquals(QueryNotSupportedFault.INSTANCE.getErrorCode(), exception.getErrorCode());
+    Assertions.assertEquals(TIMESERIES_NOT_SUPPORTED_MSG, exception.getMessage());
   }
 
   private Response doPost(String simpleScanQuery, MockHttpServletRequest testServletRequest)
