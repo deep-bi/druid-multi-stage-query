@@ -42,23 +42,26 @@ import org.apache.druid.indexing.common.config.TaskConfig;
 import org.apache.druid.indexing.common.task.AbstractTask;
 import org.apache.druid.indexing.common.task.PendingSegmentAllocatingTask;
 import org.apache.druid.indexing.common.task.Tasks;
-import org.apache.druid.java.util.common.ISE;
-import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.exec.Controller;
 import org.apache.druid.msq.exec.ControllerContext;
 import org.apache.druid.msq.exec.ControllerImpl;
 import org.apache.druid.msq.exec.MSQTasks;
+import org.apache.druid.msq.exec.ResultsContext;
 import org.apache.druid.msq.indexing.destination.DataSourceMSQDestination;
 import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
 import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
+import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.query.QueryContext;
+import org.apache.druid.query.QueryContexts;
 import org.apache.druid.rpc.ServiceClientFactory;
 import org.apache.druid.rpc.StandardRetryPolicy;
 import org.apache.druid.rpc.indexing.OverlordClient;
 import org.apache.druid.segment.column.ColumnType;
+import org.apache.druid.server.coordination.BroadcastDatasourceLoadingSpec;
+import org.apache.druid.server.lookup.cache.LookupLoadingSpec;
 import org.apache.druid.server.security.Resource;
 import org.apache.druid.server.security.ResourceAction;
 import org.apache.druid.sql.calcite.run.SqlResults;
@@ -73,7 +76,7 @@ import java.util.Set;
 
 @JsonTypeName(MSQControllerTask.TYPE)
 public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
-    PendingSegmentAllocatingTask, HasQuerySpec
+    PendingSegmentAllocatingTask, IsMSQTask
 {
   public static final String TYPE = "query_controller";
   public static final String DUMMY_DATASOURCE_FOR_SELECT = "__query_select";
@@ -144,6 +147,22 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
     addToContext(Tasks.FORCE_TIME_CHUNK_LOCK_KEY, true);
   }
 
+  public MSQControllerTask(
+      @Nullable String id,
+      MSQSpec querySpec,
+      @Nullable String sqlQuery,
+      @Nullable Map<String, Object> sqlQueryContext,
+      @Nullable SqlResults.Context sqlResultsContext,
+      @Nullable List<SqlTypeName> sqlTypeNames,
+      @Nullable List<ColumnType> nativeTypeNames,
+      @Nullable Map<String, Object> context,
+      Injector injector
+  )
+  {
+    this(id, querySpec, sqlQuery, sqlQueryContext, sqlResultsContext, sqlTypeNames, nativeTypeNames, context);
+    this.injector = injector;
+  }
+
   @Override
   public String getType()
   {
@@ -160,6 +179,11 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
   }
 
   @Override
+  public String getTaskAllocatorId()
+  {
+    return getId();
+  }
+
   @JsonProperty("spec")
   public MSQSpec getQuerySpec()
   {
@@ -212,8 +236,7 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
   {
     // If we're in replace mode, acquire locks for all intervals before declaring the task ready.
     if (isIngestion(querySpec) && ((DataSourceMSQDestination) querySpec.getDestination()).isReplaceTimeChunks()) {
-      final TaskLockType taskLockType =
-          MultiStageQueryContext.validateAndGetTaskLockType(QueryContext.of(querySpec.getQuery().getContext()), true);
+      final TaskLockType taskLockType = getTaskLockType();
       final List<Interval> intervals =
           ((DataSourceMSQDestination) querySpec.getDestination()).getReplaceTimeChunks();
       log.debug(
@@ -228,9 +251,8 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
 
         if (taskLock == null) {
           return false;
-        } else if (taskLock.isRevoked()) {
-          throw new ISE(StringUtils.format("Lock for interval [%s] was revoked", interval));
         }
+        taskLock.assertNotRevoked();
       }
     }
 
@@ -245,20 +267,38 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
     final OverlordClient overlordClient = injector.getInstance(OverlordClient.class)
                                                   .withRetryPolicy(StandardRetryPolicy.unlimited());
     final ControllerContext context = new IndexerControllerContext(
+        this,
         toolbox,
         injector,
         clientFactory,
         overlordClient
     );
-    controller = new ControllerImpl(this, context);
-    return controller.run();
+
+    controller = new ControllerImpl(
+        this.getId(),
+        querySpec,
+        new ResultsContext(getSqlTypeNames(), getSqlResultsContext()),
+        context
+    );
+
+    final TaskReportQueryListener queryListener = new TaskReportQueryListener(
+        querySpec.getDestination(),
+        () -> toolbox.getTaskReportFileWriter().openReportOutputStream(getId()),
+        toolbox.getJsonMapper(),
+        getId(),
+        getContext(),
+        false
+    );
+
+    controller.run(queryListener);
+    return queryListener.getStatusReport().toTaskStatus(getId());
   }
 
   @Override
   public void stopGracefully(final TaskConfig taskConfig)
   {
     if (controller != null) {
-      controller.stopGracefully();
+      controller.stop();
     }
   }
 
@@ -266,6 +306,26 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
   public int getPriority()
   {
     return getContextValue(Tasks.PRIORITY_KEY, Tasks.DEFAULT_BATCH_INDEX_TASK_PRIORITY);
+  }
+
+  @Nullable
+  public TaskLockType getTaskLockType()
+  {
+    if (isIngestion(querySpec)) {
+      return MultiStageQueryContext.validateAndGetTaskLockType(
+          QueryContext.of(
+              // Use the task context and override with the query context
+              QueryContexts.override(
+                  getContext(),
+                  querySpec.getQuery().getContext()
+              )
+          ),
+          ((DataSourceMSQDestination) querySpec.getDestination()).isReplaceTimeChunks()
+      );
+    } else {
+      // Locks need to be acquired only if data is being ingested into a DataSource
+      return null;
+    }
   }
 
   private static String getDataSourceForTaskMetadata(final MSQSpec querySpec)
@@ -285,20 +345,36 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
     return querySpec.getDestination().getDestinationResource();
   }
 
-  @Override
-  public String getTaskAllocatorId()
-  {
-    return getId();
-  }
-
+  /**
+   * Checks whether the task is an ingestion into a Druid datasource.
+   */
   public static boolean isIngestion(final MSQSpec querySpec)
   {
     return querySpec.getDestination() instanceof DataSourceMSQDestination;
   }
 
+  /**
+   * Checks whether the task is an export into external files.
+   */
   public static boolean isExport(final MSQSpec querySpec)
   {
     return querySpec.getDestination() instanceof ExportMSQDestination;
+  }
+
+  /**
+   * Checks whether the task is an async query which writes frame files containing the final results into durable storage.
+   */
+  public static boolean writeFinalStageResultsToDurableStorage(final MSQSpec querySpec)
+  {
+    return querySpec.getDestination() instanceof DurableStorageMSQDestination;
+  }
+
+  /**
+   * Checks whether the task is an async query which writes frame files containing the final results into durable storage.
+   */
+  public static boolean writeFinalResultsToTaskReport(final MSQSpec querySpec)
+  {
+    return querySpec.getDestination() instanceof TaskReportMSQDestination;
   }
 
   /**
@@ -316,9 +392,15 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
     }
   }
 
-  public static boolean writeResultsToDurableStorage(final MSQSpec querySpec)
+  @Override
+  public LookupLoadingSpec getLookupLoadingSpec()
   {
-    return querySpec.getDestination() instanceof DurableStorageMSQDestination;
+    return LookupLoadingSpec.NONE;
   }
 
+  @Override
+  public BroadcastDatasourceLoadingSpec getBroadcastDatasourceLoadingSpec()
+  {
+    return BroadcastDatasourceLoadingSpec.NONE;
+  }
 }

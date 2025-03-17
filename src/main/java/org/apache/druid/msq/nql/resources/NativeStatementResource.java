@@ -45,9 +45,11 @@ import org.apache.druid.msq.AbstractStatementResource;
 import org.apache.druid.msq.guice.MultiStageQuery;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
+import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.kernel.StageDefinition;
 import org.apache.druid.msq.nql.MSQNativeTaskQueryMaker;
 import org.apache.druid.msq.nql.NativeStatementResult;
+import org.apache.druid.msq.querykit.scan.ScanQueryKit;
 import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.util.AbstractResourceHelper;
 import org.apache.druid.msq.util.NativeStatementResourceHelper;
@@ -57,6 +59,7 @@ import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.QueryContexts;
 import org.apache.druid.query.QueryException;
 import org.apache.druid.query.QueryToolChest;
+import org.apache.druid.query.scan.ScanQuery;
 import org.apache.druid.rpc.indexing.OverlordClient;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
@@ -76,6 +79,7 @@ import org.joda.time.DateTime;
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
+import javax.ws.rs.DefaultValue;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
@@ -219,22 +223,24 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
   @Path("/{id}")
   @Produces(MediaType.APPLICATION_JSON)
   public Response doGetStatus(
-      @PathParam("id") final String queryId, @Context final HttpServletRequest req
+      @PathParam("id") final String queryId, @QueryParam("detail") boolean detail, @QueryParam("results") @DefaultValue
+      ("true") boolean withResults, @Context final HttpServletRequest req
   )
   {
     try {
       AuthorizationUtils.setRequestAuthorizationAttributeIfNeeded(req);
       final AuthenticationResult authenticationResult = AuthorizationUtils.authenticationResultFromRequest(req);
 
-      Optional<NativeStatementResult> sqlStatementResult = getStatementStatus(
+      Optional<NativeStatementResult> statementResult = getStatementStatus(
           queryId,
           authenticationResult,
-          true,
-          Action.READ
+          withResults,
+          Action.READ,
+          detail
       );
 
-      if (sqlStatementResult.isPresent()) {
-        return Response.ok().entity(sqlStatementResult.get()).build();
+      if (statementResult.isPresent()) {
+        return Response.ok().entity(statementResult.get()).build();
       } else {
         throw queryNotFoundException(queryId);
       }
@@ -347,7 +353,8 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
           queryId,
           authenticationResult,
           false,
-          Action.WRITE
+          Action.WRITE,
+          false
       );
       if (nativeStatementResult.isPresent()) {
         switch (nativeStatementResult.get().getState()) {
@@ -383,6 +390,9 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
 
   private RowSignature getRowSignature(Query<?> query)
   {
+    if (query instanceof ScanQuery) {
+      return ScanQueryKit.getAndValidateSignature((ScanQuery) query, jsonMapper);
+    }
     QueryLifecycle lifecycle = lifecycleFactory.factorize();
     lifecycle.initialize(query);
     QueryToolChest<?, Query<?>> toolChest = lifecycle.getToolChest();
@@ -408,7 +418,8 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
       String queryId,
       AuthenticationResult authenticationResult,
       boolean withResults,
-      Action forAction
+      Action forAction,
+      boolean detail
   ) throws DruidException
   {
     TaskStatusResponse taskResponse = contactOverlord(overlordClient.taskStatus(queryId), queryId);
@@ -430,14 +441,29 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
     );
     StatementState statementState = AbstractResourceHelper.getSqlStatementState(statusPlus);
 
+    MSQTaskReportPayload taskReportPayload = null;
+    if (detail || StatementState.FAILED == statementState) {
+      try {
+        taskReportPayload = NativeStatementResourceHelper.getPayload(
+            contactOverlord(overlordClient.taskReportAsMap(queryId), queryId)
+        );
+      }
+      catch (DruidException e) {
+        if (!e.getErrorCode().equals("notFound") && !e.getMessage().contains("Unable to contact overlord")) {
+          throw e;
+        }
+      }
+    }
+
     if (StatementState.FAILED == statementState) {
       return NativeStatementResourceHelper.getExceptionPayload(
           queryId,
           taskResponse,
           statusPlus,
           statementState,
-          contactOverlord(overlordClient.taskReportAsMap(queryId), queryId),
-          jsonMapper
+          taskReportPayload,
+          jsonMapper,
+          detail
       );
     } else {
 
@@ -448,13 +474,16 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
           taskResponse.getStatus().getCreatedTime(),
           signature,
           taskResponse.getStatus().getDuration(),
-          getResultSetInformation(
+          withResults ? getResultSetInformation(
               queryId,
               msqControllerTask.getDataSource(),
               statementState,
               msqControllerTask.getQuerySpec().getDestination()
-          ).orElse(null),
-          null
+          ).orElse(null) : null,
+          null,
+          NativeStatementResourceHelper.getQueryStagesReport(taskReportPayload),
+          NativeStatementResourceHelper.getQueryCounters(taskReportPayload),
+          NativeStatementResourceHelper.getQueryWarningDetails(taskReportPayload)
       ));
     }
   }
@@ -512,10 +541,12 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
       MSQNativeControllerTask msqControllerTask
   )
   {
-    return NativeStatementResourceHelper.getResultSequence(
-        finalStage,
+    return NativeStatementResourceHelper.INSTANCE.getResultSequence(
         frame,
-        msqControllerTask.getQuerySpec().getColumnMappings()
+        finalStage.getFrameReader(),
+        msqControllerTask.getQuerySpec().getColumnMappings(),
+        null,
+        null
     );
   }
 

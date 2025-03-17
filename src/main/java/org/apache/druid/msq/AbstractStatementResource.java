@@ -38,7 +38,7 @@ import org.apache.druid.java.util.common.guava.Yielder;
 import org.apache.druid.java.util.common.guava.Yielders;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
-import org.apache.druid.msq.indexing.HasQuerySpec;
+import org.apache.druid.msq.indexing.IsMSQTask;
 import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQSelectDestination;
@@ -71,7 +71,6 @@ import org.apache.druid.storage.StorageConnector;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 
 import javax.ws.rs.core.Response;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -79,7 +78,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-public abstract class AbstractStatementResource<ResultType extends StatementResult, TaskType extends AbstractTask & HasQuerySpec>
+public abstract class AbstractStatementResource<ResultType extends StatementResult, TaskType extends AbstractTask & IsMSQTask>
 {
   private static final Logger log = new Logger(AbstractStatementResource.class);
   protected final ObjectMapper jsonMapper;
@@ -136,7 +135,7 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
     }
     String taskId = String.valueOf(firstRow[0]);
 
-    Optional<ResultType> statementResult = getStatementStatus(taskId, authenticationResult, true, Action.READ);
+    Optional<ResultType> statementResult = getStatementStatus(taskId, authenticationResult, true, Action.READ, false);
 
     if (statementResult.isPresent()) {
       return Response.status(Response.Status.OK).entity(statementResult.get()).build();
@@ -235,27 +234,9 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
       List<Object[]> results = null;
       if (isSelectQuery) {
         results = new ArrayList<>();
-        Yielder<Object[]> yielder = null;
         if (msqTaskReportPayload.getResults() != null) {
-          yielder = msqTaskReportPayload.getResults().getResultYielder();
+          results = msqTaskReportPayload.getResults().getResults();
         }
-        try {
-          while (yielder != null && !yielder.isDone()) {
-            results.add(yielder.get());
-            yielder = yielder.next(null);
-          }
-        }
-        finally {
-          if (yielder != null) {
-            try {
-              yielder.close();
-            }
-            catch (IOException e) {
-              log.warn(e, StringUtils.format("Unable to close yielder for query[%s]", queryId));
-            }
-          }
-        }
-
       }
 
       return Optional.of(
@@ -294,10 +275,10 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
           contactOverlord(overlordClient.taskReportAsMap(queryId), queryId)
       );
 
-      if (msqTaskReportPayload.getResults().getResultYielder() == null) {
+      if (msqTaskReportPayload.getResults().getResults() == null) {
         results = Optional.empty();
       } else {
-        results = Optional.of(msqTaskReportPayload.getResults().getResultYielder());
+        results = Optional.of(Yielders.each(Sequences.simple(msqTaskReportPayload.getResults().getResults())));
       }
 
     } else if (msqControllerTask.getQuerySpec().getDestination() instanceof DurableStorageMSQDestination) {
@@ -470,7 +451,8 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
       String queryId,
       AuthenticationResult authenticationResult,
       boolean withResults,
-      Action forAction
+      Action forAction,
+      boolean detail
   ) throws DruidException;
 
   protected abstract DruidException queryNotFoundException(String queryId);

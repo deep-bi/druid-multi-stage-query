@@ -104,7 +104,7 @@ public class SegmentLoadStatusFetcher implements AutoCloseable
   public SegmentLoadStatusFetcher(
       BrokerClient brokerClient,
       ObjectMapper objectMapper,
-      String taskId,
+      String queryId,
       String datasource,
       Set<DataSegment> dataSegments,
       boolean doWait
@@ -128,7 +128,9 @@ public class SegmentLoadStatusFetcher implements AutoCloseable
         totalSegmentsGenerated
     ));
     this.doWait = doWait;
-    this.executorService = MoreExecutors.listeningDecorator(Execs.singleThreaded(taskId + "-segment-load-waiter-%d"));
+    this.executorService = MoreExecutors.listeningDecorator(
+        Execs.singleThreaded(StringUtils.encodeForFormat(queryId) + "-segment-load-waiter-%d")
+    );
   }
 
   /**
@@ -319,7 +321,7 @@ public class SegmentLoadStatusFetcher implements AutoCloseable
 
     @JsonCreator
     public SegmentLoadWaiterStatus(
-        @JsonProperty("state") SegmentLoadStatusFetcher.State state,
+        @JsonProperty("state") State state,
         @JsonProperty("startTime") @Nullable DateTime startTime,
         @JsonProperty("duration") long duration,
         @JsonProperty("totalSegments") int totalSegments,
@@ -342,7 +344,7 @@ public class SegmentLoadStatusFetcher implements AutoCloseable
     }
 
     @JsonProperty
-    public SegmentLoadStatusFetcher.State getState()
+    public State getState()
     {
       return state;
     }

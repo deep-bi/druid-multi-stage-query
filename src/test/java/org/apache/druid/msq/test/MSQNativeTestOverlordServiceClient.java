@@ -24,6 +24,7 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.inject.Injector;
 import org.apache.druid.client.ImmutableSegmentLoadInfo;
+import org.apache.druid.indexer.TaskStatus;
 import org.apache.druid.indexing.common.actions.TaskActionClient;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.msq.exec.NativeControllerImpl;
@@ -48,33 +49,53 @@ public class MSQNativeTestOverlordServiceClient extends MSQTestOverlordServiceCl
   @Override
   public ListenableFuture<Void> runTask(String taskId, Object taskObject)
   {
+    TestQueryListener queryListener = null;
     NativeControllerImpl controller = null;
-    MSQTestControllerContext msqTestControllerContext = null;
+    MSQTestControllerContext msqTestControllerContext;
     try {
+      MSQNativeControllerTask cTask = objectMapper.convertValue(taskObject, MSQNativeControllerTask.class);
+
       msqTestControllerContext = new MSQTestControllerContext(
           objectMapper,
           injector,
           taskActionClient,
           workerMemoryParameters,
-          loadedSegmentMetadata
+          loadedSegmentMetadata,
+          cTask.getTaskLockType(),
+          cTask.getQuerySpec().getQuery().context()
       );
 
-      MSQNativeControllerTask cTask = objectMapper.convertValue(taskObject, MSQNativeControllerTask.class);
       inMemoryControllerTask.put(cTask.getId(), cTask);
 
-      controller = new NativeControllerImpl(cTask, msqTestControllerContext);
+      controller = new NativeControllerImpl(
+          cTask.getId(),
+          cTask.getQuerySpec(),
+          msqTestControllerContext
+      );
 
-      inMemoryControllers.put(controller.id(), controller);
+      inMemoryControllers.put(controller.queryId(), controller);
 
-      inMemoryTaskStatus.put(taskId, controller.run());
+      queryListener =
+          new TestQueryListener(
+              cTask.getId(),
+              cTask.getQuerySpec().getDestination()
+          );
+
+      try {
+        controller.run(queryListener);
+        inMemoryTaskStatus.put(taskId, queryListener.getStatusReport().toTaskStatus(cTask.getId()));
+      }
+      catch (Exception e) {
+        inMemoryTaskStatus.put(taskId, TaskStatus.failure(cTask.getId(), e.toString()));
+      }
       return Futures.immediateFuture(null);
     }
     catch (Exception e) {
       throw new ISE(e, "Unable to run");
     }
     finally {
-      if (controller != null && msqTestControllerContext != null) {
-        reports.put(controller.id(), msqTestControllerContext.getAllReports());
+      if (controller != null && queryListener != null) {
+        reports.put(controller.queryId(), queryListener.getReportMap());
       }
     }
   }

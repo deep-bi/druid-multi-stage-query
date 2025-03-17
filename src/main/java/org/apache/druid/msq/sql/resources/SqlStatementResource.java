@@ -33,7 +33,6 @@ import org.apache.druid.error.InvalidInput;
 import org.apache.druid.error.NotFound;
 import org.apache.druid.error.QueryExceptionCompat;
 import org.apache.druid.frame.Frame;
-import org.apache.druid.guice.annotations.MSQ;
 import org.apache.druid.indexer.TaskStatusPlus;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.StringUtils;
@@ -43,9 +42,11 @@ import org.apache.druid.java.util.common.guava.Yielders;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.AbstractStatementResource;
+import org.apache.druid.msq.exec.ResultsContext;
 import org.apache.druid.msq.guice.MultiStageQuery;
 import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
+import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.kernel.StageDefinition;
 import org.apache.druid.msq.sql.MSQTaskSqlEngine;
 import org.apache.druid.msq.sql.StatementState;
@@ -108,7 +109,7 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
 
   @Inject
   public SqlStatementResource(
-      final @MSQ SqlStatementFactory msqSqlStatementFactory,
+      final @MultiStageQuery SqlStatementFactory msqSqlStatementFactory,
       final ObjectMapper jsonMapper,
       final OverlordClient overlordClient,
       final @MultiStageQuery StorageConnector storageConnector,
@@ -239,7 +240,9 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
   @Path("/{id}")
   @Produces(MediaType.APPLICATION_JSON)
   public Response doGetStatus(
-      @PathParam("id") final String queryId, @Context final HttpServletRequest req
+      @PathParam("id") final String queryId,
+      @QueryParam("detail") boolean detail,
+      @Context final HttpServletRequest req
   )
   {
     try {
@@ -250,7 +253,8 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
           queryId,
           authenticationResult,
           true,
-          Action.READ
+          Action.READ,
+          detail
       );
 
       if (sqlStatementResult.isPresent()) {
@@ -339,8 +343,6 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
           preferredFormat
       )).build();
     }
-
-
     catch (DruidException e) {
       return buildNonOkResponse(e);
     }
@@ -378,7 +380,8 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
           queryId,
           authenticationResult,
           false,
-          Action.WRITE
+          Action.WRITE,
+          false
       );
       if (sqlStatementResult.isPresent()) {
         switch (sqlStatementResult.get().getState()) {
@@ -486,7 +489,8 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       String queryId,
       AuthenticationResult authenticationResult,
       boolean withResults,
-      Action forAction
+      Action forAction,
+      boolean detail
   ) throws DruidException
   {
     TaskStatusResponse taskResponse = contactOverlord(overlordClient.taskStatus(queryId), queryId);
@@ -508,14 +512,29 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
     );
     StatementState statementState = AbstractResourceHelper.getSqlStatementState(statusPlus);
 
+    MSQTaskReportPayload taskReportPayload = null;
+    if (detail || StatementState.FAILED == statementState) {
+      try {
+        taskReportPayload = SqlStatementResourceHelper.getPayload(
+            contactOverlord(overlordClient.taskReportAsMap(queryId), queryId)
+        );
+      }
+      catch (DruidException e) {
+        if (!e.getErrorCode().equals("notFound") && !e.getMessage().contains("Unable to contact overlord")) {
+          throw e;
+        }
+      }
+    }
+
     if (StatementState.FAILED == statementState) {
       return SqlStatementResourceHelper.getExceptionPayload(
           queryId,
           taskResponse,
           statusPlus,
           statementState,
-          contactOverlord(overlordClient.taskReportAsMap(queryId), queryId),
-          jsonMapper
+          taskReportPayload,
+          jsonMapper,
+          detail
       );
     } else {
       Optional<List<ColumnNameAndTypes>> signature = SqlStatementResourceHelper.getSignature(msqControllerTask);
@@ -531,7 +550,10 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
               statementState,
               msqControllerTask.getQuerySpec().getDestination()
           ).orElse(null) : null,
-          null
+          null,
+          SqlStatementResourceHelper.getQueryStagesReport(taskReportPayload),
+          SqlStatementResourceHelper.getQueryCounters(taskReportPayload),
+          SqlStatementResourceHelper.getQueryWarningDetails(taskReportPayload)
       ));
     }
   }
@@ -585,10 +607,11 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       MSQControllerTask msqControllerTask
   )
   {
-    return SqlStatementResourceHelper.getResultSequence(
-        msqControllerTask,
-        finalStage,
+    return SqlStatementResourceHelper.INSTANCE.getResultSequence(
         frame,
+        finalStage.getFrameReader(),
+        msqControllerTask.getQuerySpec().getColumnMappings(),
+        new ResultsContext(msqControllerTask.getSqlTypeNames(), msqControllerTask.getSqlResultsContext()),
         jsonMapper
     );
   }

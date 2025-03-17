@@ -24,12 +24,14 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.druid.error.ErrorResponse;
 import org.apache.druid.msq.StatementResult;
+import org.apache.druid.msq.counters.CounterSnapshotsTree;
+import org.apache.druid.msq.indexing.error.MSQErrorReport;
+import org.apache.druid.msq.indexing.report.MSQStagesReport;
 import org.apache.druid.msq.sql.StatementState;
 import org.joda.time.DateTime;
 
 import javax.annotation.Nullable;
 import java.util.List;
-import java.util.Objects;
 
 public class SqlStatementResult implements StatementResult
 {
@@ -52,6 +54,27 @@ public class SqlStatementResult implements StatementResult
   @Nullable
   private final ErrorResponse errorResponse;
 
+  @Nullable
+  private final MSQStagesReport stages;
+
+  @Nullable
+  private final CounterSnapshotsTree counters;
+
+  @Nullable
+  private final List<MSQErrorReport> warnings;
+
+  public SqlStatementResult(
+      String queryId,
+      StatementState state,
+      DateTime createdAt,
+      List<ColumnNameAndTypes> sqlRowSignature,
+      Long durationMs,
+      ResultSetInformation resultSetInformation,
+      ErrorResponse errorResponse
+  )
+  {
+    this(queryId, state, createdAt, sqlRowSignature, durationMs, resultSetInformation, errorResponse, null, null, null);
+  }
 
   @JsonCreator
   public SqlStatementResult(
@@ -68,8 +91,13 @@ public class SqlStatementResult implements StatementResult
       @Nullable @JsonProperty("result")
       ResultSetInformation resultSetInformation,
       @Nullable @JsonProperty("errorDetails")
-      ErrorResponse errorResponse
-
+      ErrorResponse errorResponse,
+      @Nullable @JsonProperty("stages")
+      MSQStagesReport stages,
+      @Nullable @JsonProperty("counters")
+      CounterSnapshotsTree counters,
+      @Nullable @JsonProperty("warnings")
+      List<MSQErrorReport> warnings
   )
   {
     this.queryId = queryId;
@@ -79,6 +107,9 @@ public class SqlStatementResult implements StatementResult
     this.durationMs = durationMs;
     this.resultSetInformation = resultSetInformation;
     this.errorResponse = errorResponse;
+    this.stages = stages;
+    this.counters = counters;
+    this.warnings = warnings;
   }
 
   @JsonProperty
@@ -131,41 +162,28 @@ public class SqlStatementResult implements StatementResult
     return errorResponse;
   }
 
-
-  @Override
-  public boolean equals(Object o)
+  @JsonProperty("stages")
+  @Nullable
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public MSQStagesReport getStages()
   {
-    if (this == o) {
-      return true;
-    }
-    if (o == null || getClass() != o.getClass()) {
-      return false;
-    }
-    SqlStatementResult that = (SqlStatementResult) o;
-    return Objects.equals(queryId, that.queryId) && state == that.state && Objects.equals(
-        createdAt,
-        that.createdAt
-    ) && Objects.equals(sqlRowSignature, that.sqlRowSignature) && Objects.equals(
-        durationMs,
-        that.durationMs
-    ) && Objects.equals(resultSetInformation, that.resultSetInformation) && Objects.equals(
-        errorResponse == null ? null : errorResponse.getAsMap(),
-        that.errorResponse == null ? null : that.errorResponse.getAsMap()
-    );
+    return stages;
   }
 
-  @Override
-  public int hashCode()
+  @JsonProperty("counters")
+  @Nullable
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public CounterSnapshotsTree getCounters()
   {
-    return Objects.hash(
-        queryId,
-        state,
-        createdAt,
-        sqlRowSignature,
-        durationMs,
-        resultSetInformation,
-        errorResponse == null ? null : errorResponse.getAsMap()
-    );
+    return counters;
+  }
+
+  @JsonProperty("warnings")
+  @Nullable
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public List<MSQErrorReport> getWarnings()
+  {
+    return warnings;
   }
 
   @Override
@@ -181,6 +199,9 @@ public class SqlStatementResult implements StatementResult
            ", errorResponse=" + (errorResponse == null
                                  ? "{}"
                                  : errorResponse.getAsMap().toString()) +
+           ", stages=" + stages +
+           ", counters=" + counters +
+           ", warnings=" + warnings +
            '}';
   }
 }

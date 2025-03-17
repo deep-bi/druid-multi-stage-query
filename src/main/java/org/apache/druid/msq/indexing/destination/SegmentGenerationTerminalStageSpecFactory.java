@@ -17,10 +17,19 @@
  * under the License.
  */
 
-package org.apache.druid.msq.indexing;
+package org.apache.druid.msq.indexing.destination;
 
-public interface HasQuerySpec
+import org.apache.druid.sql.calcite.planner.PlannerContext;
+import org.apache.druid.sql.calcite.rel.DruidQuery;
+
+/**
+ * Configures ingestion queries to create new segments with the results in all cases.
+ */
+public class SegmentGenerationTerminalStageSpecFactory implements MSQTerminalStageSpecFactory
 {
-
-  MSQSpec getQuerySpec();
+  @Override
+  public TerminalStageSpec createTerminalStageSpec(DruidQuery druidQuery, PlannerContext plannerContext)
+  {
+    return SegmentGenerationStageSpec.instance();
+  }
 }

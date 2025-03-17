@@ -26,14 +26,15 @@ import org.apache.druid.error.DruidException;
 import org.apache.druid.error.NotFound;
 import org.apache.druid.frame.Frame;
 import org.apache.druid.frame.processor.FrameProcessors;
+import org.apache.druid.frame.read.FrameReader;
 import org.apache.druid.indexer.TaskStatusPlus;
-import org.apache.druid.indexer.report.TaskReport;
 import org.apache.druid.java.util.common.guava.Sequence;
 import org.apache.druid.java.util.common.guava.Sequences;
+import org.apache.druid.msq.exec.ResultsContext;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.error.MSQErrorReport;
 import org.apache.druid.msq.indexing.error.MSQFault;
-import org.apache.druid.msq.kernel.StageDefinition;
+import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.nql.NativeStatementResult;
 import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.segment.ColumnSelectorFactory;
@@ -43,23 +44,27 @@ import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
 
+import javax.validation.constraints.Null;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class NativeStatementResourceHelper extends AbstractResourceHelper
 {
 
+  public static final NativeStatementResourceHelper INSTANCE = new NativeStatementResourceHelper();
+
   public static Map<String, ColumnType> getColumnTypes(RowSignature signature)
   {
-    return signature.getColumnNames().stream()
-                    .filter(name -> signature.getColumnType(name).isPresent())
-                    .collect(Collectors.toMap(
-                        name -> name,
-                        name -> signature.getColumnType(name).get()
-                    ));
+    Map<String, ColumnType> result = new LinkedHashMap<>();
+    signature.getColumnNames().stream()
+             .filter(name -> signature.getColumnType(name).isPresent())
+             .forEach(name -> result.put(name, signature.getColumnType(name).get()));
+    return result;
   }
 
   public static Optional<NativeStatementResult> getExceptionPayload(
@@ -67,11 +72,12 @@ public class NativeStatementResourceHelper extends AbstractResourceHelper
       TaskStatusResponse taskResponse,
       TaskStatusPlus statusPlus,
       StatementState statementState,
-      TaskReport.ReportMap msqPayload,
-      ObjectMapper jsonMapper
+      MSQTaskReportPayload msqPayload,
+      ObjectMapper jsonMapper,
+      boolean detail
   )
   {
-    final MSQErrorReport exceptionDetails = getQueryExceptionDetails(getPayload(msqPayload));
+    final MSQErrorReport exceptionDetails = getQueryExceptionDetails(msqPayload);
     final MSQFault fault = exceptionDetails == null ? null : exceptionDetails.getFault();
     if (exceptionDetails == null || fault == null) {
       return Optional.of(new NativeStatementResult(
@@ -84,7 +90,10 @@ public class NativeStatementResourceHelper extends AbstractResourceHelper
           DruidException.forPersona(DruidException.Persona.DEVELOPER)
                         .ofCategory(DruidException.Category.UNCATEGORIZED)
                         .build("%s", taskResponse.getStatus().getErrorMsg())
-                        .toErrorResponse()
+                        .toErrorResponse(),
+          detail ? getQueryStagesReport(msqPayload) : null,
+          detail ? getQueryCounters(msqPayload) : null,
+          detail ? getQueryWarningDetails(msqPayload) : null
       ));
     }
 
@@ -110,18 +119,34 @@ public class NativeStatementResourceHelper extends AbstractResourceHelper
             ex.withContext(exceptionContext);
             return ex;
           }
-        }).toErrorResponse()
+        }).toErrorResponse(),
+        detail ? getQueryStagesReport(msqPayload) : null,
+        detail ? getQueryCounters(msqPayload) : null,
+        detail ? getQueryWarningDetails(msqPayload) : null
     ));
   }
 
+  public static void isMSQPayload(TaskPayloadResponse taskPayloadResponse, String queryId) throws DruidException
+  {
+    if (taskPayloadResponse == null || taskPayloadResponse.getPayload() == null) {
+      throw NotFound.exception("Query[%s] not found", queryId);
+    }
 
-  public static Sequence<Object[]> getResultSequence(
-      StageDefinition finalStage,
-      Frame frame,
-      ColumnMappings columnMappings
+    if (!(taskPayloadResponse.getPayload() instanceof MSQNativeControllerTask)) {
+      throw NotFound.exception("Query[%s] not found", queryId);
+    }
+  }
+
+  @Override
+  public Sequence<Object[]> getResultSequence(
+      final Frame frame,
+      final FrameReader resultFrameReader,
+      final ColumnMappings columnMappings,
+      @Null final ResultsContext resultsContext, // unused added for api compatibility
+      @Null final ObjectMapper jsonMapper // unused added for api compatibility
   )
   {
-    final Cursor cursor = FrameProcessors.makeCursor(frame, finalStage.getFrameReader());
+    final Cursor cursor = FrameProcessors.makeCursor(frame, resultFrameReader);
 
     final ColumnSelectorFactory columnSelectorFactory = cursor.getColumnSelectorFactory();
     @SuppressWarnings("rawtypes")
@@ -142,6 +167,10 @@ public class NativeStatementResourceHelper extends AbstractResourceHelper
       @Override
       public Object[] next()
       {
+        if (!hasNext()) {
+          throw new NoSuchElementException();
+        }
+
         final Object[] row = new Object[columnMappings.size()];
         for (int i = 0; i < row.length; i++) {
           final Object value = selectors.get(i).getObject();
@@ -153,16 +182,5 @@ public class NativeStatementResourceHelper extends AbstractResourceHelper
       }
     };
     return Sequences.simple(retVal);
-  }
-
-  public static void isMSQPayload(TaskPayloadResponse taskPayloadResponse, String queryId) throws DruidException
-  {
-    if (taskPayloadResponse == null || taskPayloadResponse.getPayload() == null) {
-      throw NotFound.exception("Query[%s] not found", queryId);
-    }
-
-    if (!(taskPayloadResponse.getPayload() instanceof MSQNativeControllerTask)) {
-      throw NotFound.exception("Query[%s] not found", queryId);
-    }
   }
 }

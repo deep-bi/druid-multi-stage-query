@@ -81,7 +81,7 @@ public abstract class MSQTestOverlordServiceClient<TaskType extends AbstractTask
   @Override
   public ListenableFuture<Void> cancelTask(String taskId)
   {
-    inMemoryControllers.get(taskId).stopGracefully();
+    inMemoryControllers.get(taskId).stop();
     return Futures.immediateFuture(null);
   }
 
