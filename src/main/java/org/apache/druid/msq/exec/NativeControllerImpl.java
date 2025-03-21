@@ -82,7 +82,7 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
   @Override
   protected boolean isNativeQuery()
   {
-    return false;
+    return true;
   }
 
   @SuppressWarnings("unchecked")

@@ -60,11 +60,14 @@ public class NativeStatementResourceHelper extends AbstractResourceHelper
 
   public static Map<String, ColumnType> getColumnTypes(RowSignature signature)
   {
-    Map<String, ColumnType> result = new LinkedHashMap<>();
-    signature.getColumnNames().stream()
-             .filter(name -> signature.getColumnType(name).isPresent())
-             .forEach(name -> result.put(name, signature.getColumnType(name).get()));
-    return result;
+    return signature.getColumnNames().stream()
+                    .filter(name -> signature.getColumnType(name).isPresent())
+                    .collect(Collectors.toMap(
+                        name -> name,
+                        name -> signature.getColumnType(name).get(),
+                        (a, b) -> a,
+                        LinkedHashMap::new
+                    ));
   }
 
   public static Optional<NativeStatementResult> getExceptionPayload(

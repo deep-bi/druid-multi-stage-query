@@ -27,6 +27,7 @@ public interface IsMSQTask
 {
 
   MSQSpec getQuerySpec();
+
   @Nullable
-  TaskLockType getTaskLockType();
+  default TaskLockType getTaskLockType() {return null;}
 }

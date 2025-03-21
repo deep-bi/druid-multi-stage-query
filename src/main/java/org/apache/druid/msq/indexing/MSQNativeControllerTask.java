@@ -59,7 +59,6 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
 
   public static final String TYPE = "native_query_controller";
   public static final String DUMMY_DATASOURCE_FOR_SELECT = "__query_select";
-  private static final Logger log = new Logger(MSQNativeControllerTask.class);
 
   private final MSQSpec querySpec;
   private final RowSignature signature;
@@ -164,13 +163,6 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
   public MSQSpec getQuerySpec()
   {
     return querySpec;
-  }
-
-  @Nullable
-  @Override
-  public TaskLockType getTaskLockType()
-  {
-    return null;
   }
 
   @JsonProperty("signature")
