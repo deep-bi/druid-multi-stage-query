@@ -27,23 +27,45 @@ import org.apache.druid.indexer.TaskStatusPlus;
 import org.apache.druid.indexer.report.TaskReport;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.jackson.JacksonUtils;
+import org.apache.druid.msq.counters.CounterSnapshotsTree;
 import org.apache.druid.msq.indexing.error.MSQErrorReport;
 import org.apache.druid.msq.indexing.error.MSQFault;
+import org.apache.druid.msq.indexing.report.MSQStagesReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.sql.StatementState;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-public abstract class AbstractResourceHelper
+public abstract class AbstractResourceHelper implements ResultSequenceProvider
 {
   @Nullable
-  protected static MSQErrorReport getQueryExceptionDetails(MSQTaskReportPayload payload)
+  protected static MSQErrorReport getQueryExceptionDetails(@Nullable MSQTaskReportPayload payload)
   {
     return payload == null ? null : payload.getStatus().getErrorReport();
+  }
+
+  @Nullable
+  public static List<MSQErrorReport> getQueryWarningDetails(@Nullable MSQTaskReportPayload payload)
+  {
+    return payload == null ? null : new ArrayList<>(payload.getStatus().getWarningReports());
+  }
+
+  @Nullable
+  public static MSQStagesReport getQueryStagesReport(@Nullable MSQTaskReportPayload payload)
+  {
+    return payload == null ? null : payload.getStages();
+  }
+
+  @Nullable
+  public static CounterSnapshotsTree getQueryCounters(@Nullable MSQTaskReportPayload payload)
+  {
+    return payload == null ? null : payload.getCounters();
   }
 
   @Nullable

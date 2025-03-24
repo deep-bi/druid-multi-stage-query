@@ -28,8 +28,8 @@ import org.apache.druid.error.DruidException;
 import org.apache.druid.error.NotFound;
 import org.apache.druid.frame.Frame;
 import org.apache.druid.frame.processor.FrameProcessors;
+import org.apache.druid.frame.read.FrameReader;
 import org.apache.druid.indexer.TaskStatusPlus;
-import org.apache.druid.indexer.report.TaskReport;
 import org.apache.druid.java.util.common.guava.Sequence;
 import org.apache.druid.java.util.common.guava.Sequences;
 import org.apache.druid.msq.counters.ChannelCounters;
@@ -37,6 +37,7 @@ import org.apache.druid.msq.counters.CounterSnapshots;
 import org.apache.druid.msq.counters.CounterSnapshotsTree;
 import org.apache.druid.msq.counters.QueryCounterSnapshot;
 import org.apache.druid.msq.counters.SegmentGenerationProgressCounter;
+import org.apache.druid.msq.exec.ResultsContext;
 import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.apache.druid.msq.indexing.destination.DataSourceMSQDestination;
 import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
@@ -46,7 +47,6 @@ import org.apache.druid.msq.indexing.error.MSQErrorReport;
 import org.apache.druid.msq.indexing.error.MSQFault;
 import org.apache.druid.msq.indexing.report.MSQStagesReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
-import org.apache.druid.msq.kernel.StageDefinition;
 import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.entity.ColumnNameAndTypes;
 import org.apache.druid.msq.sql.entity.PageInformation;
@@ -64,11 +64,15 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class SqlStatementResourceHelper extends AbstractResourceHelper
 {
+
+  public static final SqlStatementResourceHelper INSTANCE = new SqlStatementResourceHelper();
+
   public static Optional<List<ColumnNameAndTypes>> getSignature(
       MSQControllerTask msqControllerTask
   )
@@ -217,17 +221,18 @@ public class SqlStatementResourceHelper extends AbstractResourceHelper
       String queryId,
       TaskStatusResponse taskResponse,
       TaskStatusPlus statusPlus,
-      StatementState statementState,
-      TaskReport.ReportMap msqPayload,
-      ObjectMapper jsonMapper
+      StatementState sqlStatementState,
+      MSQTaskReportPayload msqTaskReportPayload,
+      ObjectMapper jsonMapper,
+      boolean detail
   )
   {
-    final MSQErrorReport exceptionDetails = getQueryExceptionDetails(getPayload(msqPayload));
+    final MSQErrorReport exceptionDetails = getQueryExceptionDetails(msqTaskReportPayload);
     final MSQFault fault = exceptionDetails == null ? null : exceptionDetails.getFault();
     if (exceptionDetails == null || fault == null) {
       return Optional.of(new SqlStatementResult(
           queryId,
-          statementState,
+          sqlStatementState,
           taskResponse.getStatus().getCreatedTime(),
           null,
           taskResponse.getStatus().getDuration(),
@@ -235,7 +240,10 @@ public class SqlStatementResourceHelper extends AbstractResourceHelper
           DruidException.forPersona(DruidException.Persona.DEVELOPER)
                         .ofCategory(DruidException.Category.UNCATEGORIZED)
                         .build("%s", taskResponse.getStatus().getErrorMsg())
-                        .toErrorResponse()
+                        .toErrorResponse(),
+          detail ? getQueryStagesReport(msqTaskReportPayload) : null,
+          detail ? getQueryCounters(msqTaskReportPayload) : null,
+          detail ? getQueryWarningDetails(msqTaskReportPayload) : null
       ));
     }
 
@@ -245,7 +253,7 @@ public class SqlStatementResourceHelper extends AbstractResourceHelper
     final Map<String, String> exceptionContext = buildExceptionContext(fault, jsonMapper);
     return Optional.of(new SqlStatementResult(
         queryId,
-        statementState,
+        sqlStatementState,
         taskResponse.getStatus().getCreatedTime(),
         null,
         taskResponse.getStatus().getDuration(),
@@ -261,61 +269,11 @@ public class SqlStatementResourceHelper extends AbstractResourceHelper
             ex.withContext(exceptionContext);
             return ex;
           }
-        }).toErrorResponse()
+        }).toErrorResponse(),
+        detail ? getQueryStagesReport(msqTaskReportPayload) : null,
+        detail ? getQueryCounters(msqTaskReportPayload) : null,
+        detail ? getQueryWarningDetails(msqTaskReportPayload) : null
     ));
-  }
-
-  public static Sequence<Object[]> getResultSequence(
-      MSQControllerTask msqControllerTask,
-      StageDefinition finalStage,
-      Frame frame,
-      ObjectMapper jsonMapper
-  )
-  {
-    final Cursor cursor = FrameProcessors.makeCursor(frame, finalStage.getFrameReader());
-
-    final ColumnSelectorFactory columnSelectorFactory = cursor.getColumnSelectorFactory();
-    final ColumnMappings columnMappings = msqControllerTask.getQuerySpec().getColumnMappings();
-    @SuppressWarnings("rawtypes")
-    final List<ColumnValueSelector> selectors = columnMappings.getMappings()
-                                                              .stream()
-                                                              .map(mapping -> columnSelectorFactory.makeColumnValueSelector(
-                                                                  mapping.getQueryColumn()))
-                                                              .collect(Collectors.toList());
-
-    final List<SqlTypeName> sqlTypeNames = msqControllerTask.getSqlTypeNames();
-    Iterable<Object[]> retVal = () -> new Iterator<Object[]>()
-    {
-      @Override
-      public boolean hasNext()
-      {
-        return !cursor.isDone();
-      }
-
-      @Override
-      public Object[] next()
-      {
-        final Object[] row = new Object[columnMappings.size()];
-        for (int i = 0; i < row.length; i++) {
-          final Object value = selectors.get(i).getObject();
-          if (sqlTypeNames == null || msqControllerTask.getSqlResultsContext() == null) {
-            // SQL type unknown, or no SQL results context: pass-through as is.
-            row[i] = value;
-          } else {
-            row[i] = SqlResults.coerce(
-                jsonMapper,
-                msqControllerTask.getSqlResultsContext(),
-                value,
-                sqlTypeNames.get(i),
-                columnMappings.getOutputColumnName(i)
-            );
-          }
-        }
-        cursor.advance();
-        return row;
-      }
-    };
-    return Sequences.simple(retVal);
   }
 
   @Nullable
@@ -332,5 +290,61 @@ public class SqlStatementResourceHelper extends AbstractResourceHelper
       }
     }
     return null;
+  }
+
+  @Override
+  public Sequence<Object[]> getResultSequence(
+      final Frame resultsFrame,
+      final FrameReader resultFrameReader,
+      final ColumnMappings resultColumnMappings,
+      final ResultsContext resultsContext,
+      final ObjectMapper jsonMapper
+  )
+  {
+    final Cursor cursor = FrameProcessors.makeCursor(resultsFrame, resultFrameReader);
+    final ColumnSelectorFactory columnSelectorFactory = cursor.getColumnSelectorFactory();
+    @SuppressWarnings("rawtypes")
+    final List<ColumnValueSelector> selectors =
+        resultColumnMappings.getMappings()
+                            .stream()
+                            .map(mapping -> columnSelectorFactory.makeColumnValueSelector(mapping.getQueryColumn()))
+                            .collect(Collectors.toList());
+
+    final Iterable<Object[]> retVal = () -> new Iterator<Object[]>()
+    {
+      @Override
+      public boolean hasNext()
+      {
+        return !cursor.isDone();
+      }
+
+      @Override
+      public Object[] next()
+      {
+        if (!hasNext()) {
+          throw new NoSuchElementException();
+        }
+
+        final Object[] row = new Object[resultColumnMappings.size()];
+        for (int i = 0; i < row.length; i++) {
+          final Object value = selectors.get(i).getObject();
+          if (resultsContext.getSqlTypeNames() == null || resultsContext.getSqlResultsContext() == null) {
+            // SQL type unknown, or no SQL results context: pass-through as is.
+            row[i] = value;
+          } else {
+            row[i] = SqlResults.coerce(
+                jsonMapper,
+                resultsContext.getSqlResultsContext(),
+                value,
+                resultsContext.getSqlTypeNames().get(i),
+                resultColumnMappings.getOutputColumnName(i)
+            );
+          }
+        }
+        cursor.advance();
+        return row;
+      }
+    };
+    return Sequences.simple(retVal);
   }
 }

@@ -20,26 +20,21 @@
 package org.apache.druid.msq.exec;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.ListeningExecutorService;
-import com.google.common.util.concurrent.MoreExecutors;
 import it.unimi.dsi.fastutil.ints.IntList;
 import org.apache.druid.client.indexing.ClientCompactionTaskTransformSpec;
 import org.apache.druid.data.input.impl.DimensionSchema;
 import org.apache.druid.data.input.impl.DimensionsSpec;
-import org.apache.druid.data.input.impl.TimestampSpec;
 import org.apache.druid.error.DruidException;
-import org.apache.druid.frame.allocation.ArenaMemoryAllocator;
+import org.apache.druid.frame.channel.ReadableFrameChannel;
 import org.apache.druid.frame.key.ClusterBy;
 import org.apache.druid.frame.key.KeyColumn;
-import org.apache.druid.frame.processor.FrameProcessorExecutor;
+import org.apache.druid.frame.read.FrameReader;
 import org.apache.druid.indexer.TaskState;
-import org.apache.druid.indexer.TaskStatus;
 import org.apache.druid.indexer.partitions.DimensionRangePartitionsSpec;
 import org.apache.druid.indexer.partitions.DynamicPartitionsSpec;
 import org.apache.druid.indexer.partitions.PartitionsSpec;
@@ -56,56 +51,40 @@ import org.apache.druid.indexing.common.task.batch.parallel.TombstoneHelper;
 import org.apache.druid.indexing.overlord.SegmentPublishResult;
 import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.ISE;
-import org.apache.druid.java.util.common.Intervals;
 import org.apache.druid.java.util.common.JodaUtils;
 import org.apache.druid.java.util.common.Pair;
 import org.apache.druid.java.util.common.StringUtils;
-import org.apache.druid.java.util.common.concurrent.Execs;
-import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.java.util.common.granularity.Granularity;
-import org.apache.druid.java.util.common.guava.Sequences;
-import org.apache.druid.java.util.common.guava.Yielder;
-import org.apache.druid.java.util.common.guava.Yielders;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.counters.CounterSnapshotsTree;
-import org.apache.druid.msq.indexing.InputChannelFactory;
-import org.apache.druid.msq.indexing.InputChannelsImpl;
 import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.indexing.MSQTuningConfig;
-import org.apache.druid.msq.indexing.MSQWorkerTaskLauncher;
 import org.apache.druid.msq.indexing.destination.DataSourceMSQDestination;
-import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
 import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
-import org.apache.druid.msq.indexing.destination.MSQSelectDestination;
-import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
 import org.apache.druid.msq.indexing.error.CannotParseExternalDataFault;
 import org.apache.druid.msq.indexing.error.FaultsExceededChecker;
 import org.apache.druid.msq.indexing.error.InsertLockPreemptedFault;
 import org.apache.druid.msq.indexing.error.MSQErrorReport;
 import org.apache.druid.msq.indexing.error.MSQException;
-import org.apache.druid.msq.indexing.error.MSQWarnings;
 import org.apache.druid.msq.indexing.error.QueryNotSupportedFault;
 import org.apache.druid.msq.indexing.error.TooManyBucketsFault;
 import org.apache.druid.msq.indexing.error.UnknownFault;
 import org.apache.druid.msq.indexing.processor.SegmentGeneratorFrameProcessorFactory;
-import org.apache.druid.msq.indexing.report.MSQResultsReport;
+import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.input.InputSpecSlicerFactory;
 import org.apache.druid.msq.input.InputSpecs;
-import org.apache.druid.msq.input.stage.InputChannels;
 import org.apache.druid.msq.input.stage.StageInputSpec;
 import org.apache.druid.msq.kernel.QueryDefinition;
 import org.apache.druid.msq.kernel.QueryDefinitionBuilder;
 import org.apache.druid.msq.kernel.StageDefinition;
 import org.apache.druid.msq.kernel.StageId;
 import org.apache.druid.msq.kernel.controller.ControllerQueryKernel;
-import org.apache.druid.msq.querykit.QueryKit;
+import org.apache.druid.msq.querykit.QueryKitSpec;
 import org.apache.druid.msq.querykit.QueryKitUtils;
 import org.apache.druid.msq.querykit.ShuffleSpecFactory;
 import org.apache.druid.msq.querykit.results.ExportResultsFrameProcessorFactory;
-import org.apache.druid.msq.shuffle.input.DurableStorageInputChannelFactory;
-import org.apache.druid.msq.shuffle.input.WorkerInputChannelFactory;
 import org.apache.druid.msq.util.ArrayIngestMode;
 import org.apache.druid.msq.util.ControllerUtil;
 import org.apache.druid.msq.util.DimensionSchemaUtils;
@@ -114,12 +93,10 @@ import org.apache.druid.msq.util.MSQTaskQueryMakerUtils;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.msq.util.PassthroughAggregatorFactory;
 import org.apache.druid.msq.util.SqlStatementResourceHelper;
-import org.apache.druid.query.DruidMetrics;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.aggregation.AggregatorFactory;
 import org.apache.druid.query.groupby.GroupByQuery;
-import org.apache.druid.query.groupby.GroupByQueryConfig;
 import org.apache.druid.segment.DimensionHandlerUtils;
 import org.apache.druid.segment.IndexSpec;
 import org.apache.druid.segment.column.ColumnHolder;
@@ -127,12 +104,11 @@ import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.segment.column.ValueType;
 import org.apache.druid.segment.indexing.DataSchema;
-import org.apache.druid.segment.indexing.granularity.ArbitraryGranularitySpec;
 import org.apache.druid.segment.indexing.granularity.GranularitySpec;
 import org.apache.druid.segment.indexing.granularity.UniformGranularitySpec;
 import org.apache.druid.segment.transform.TransformSpec;
+import org.apache.druid.sql.calcite.parser.DruidSqlInsert;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
-import org.apache.druid.sql.calcite.rel.DruidQuery;
 import org.apache.druid.sql.http.ResultFormat;
 import org.apache.druid.storage.ExportStorageProvider;
 import org.apache.druid.timeline.CompactionState;
@@ -145,6 +121,7 @@ import org.joda.time.Interval;
 import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -154,44 +131,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class ControllerImpl extends AbstractController<MSQControllerTask>
 {
   private static final Logger log = new Logger(ControllerImpl.class);
+  protected final ResultsContext resultsContext;
 
-  /**
-   * Queue of "commands" to run on the {@link ControllerQueryKernel}. Various threads insert into the queue
-   * using {@link #addToKernelManipulationQueue}. The main thread running {@link RunQueryUntilDone#run()} reads
-   * from the queue and executes the commands.
-   * <p>
-   * This ensures that all manipulations on {@link ControllerQueryKernel}, and all core logic, are run in
-   * a single-threaded manner.
-   */
-  private final BlockingQueue<Consumer<ControllerQueryKernel>> kernelManipulationQueue =
-      new ArrayBlockingQueue<>(Limits.MAX_KERNEL_MANIPULATION_QUEUE_SIZE);
-
-  private volatile SegmentLoadStatusFetcher segmentLoadWaiter;
 
   public ControllerImpl(
-      final MSQControllerTask task,
-      final ControllerContext context
+      final String queryId,
+      final MSQSpec querySpec,
+      final ResultsContext resultsContext,
+      final ControllerContext controllerContext
   )
   {
-    super(task, context, MultiStageQueryContext.isDurableStorageEnabled(
-        task.getQuerySpec().getQuery().context()
-    ), MultiStageQueryContext.isFaultToleranceEnabled(
-        task.getQuerySpec().getQuery().context()
-    ), MultiStageQueryContext.isFailOnEmptyInsertEnabled(
-        task.getQuerySpec().getQuery().context()
-    ));
-
+    super(queryId, querySpec, controllerContext);
+    this.resultsContext = Preconditions.checkNotNull(resultsContext, "resultsContext");
   }
 
   private static TaskAction<SegmentPublishResult> createAppendAction(
@@ -206,120 +163,6 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     } else {
       throw DruidException.defensive("Invalid lock type [%s] received for append action", taskLockType);
     }
-  }
-
-
-  private static DataSchema generateDataSchema(
-      MSQSpec querySpec,
-      RowSignature querySignature,
-      ClusterBy queryClusterBy,
-      ColumnMappings columnMappings,
-      ObjectMapper jsonMapper
-  )
-  {
-    final DataSourceMSQDestination destination = (DataSourceMSQDestination) querySpec.getDestination();
-    final boolean isRollupQuery = isRollupQuery(querySpec.getQuery());
-
-    final Pair<List<DimensionSchema>, List<AggregatorFactory>> dimensionsAndAggregators =
-        makeDimensionsAndAggregatorsForIngestion(
-            querySignature,
-            queryClusterBy,
-            destination.getSegmentSortOrder(),
-            columnMappings,
-            isRollupQuery,
-            querySpec.getQuery()
-        );
-
-    return new DataSchema(
-        destination.getDataSource(),
-        new TimestampSpec(ColumnHolder.TIME_COLUMN_NAME, "millis", null),
-        new DimensionsSpec(dimensionsAndAggregators.lhs),
-        dimensionsAndAggregators.rhs.toArray(new AggregatorFactory[0]),
-        makeGranularitySpecForIngestion(
-            querySpec.getQuery(),
-            querySpec.getColumnMappings(),
-            isRollupQuery,
-            jsonMapper
-        ),
-        new TransformSpec(null, Collections.emptyList())
-    );
-  }
-
-  private static GranularitySpec makeGranularitySpecForIngestion(
-      final Query<?> query,
-      final ColumnMappings columnMappings,
-      final boolean isRollupQuery,
-      final ObjectMapper jsonMapper
-  )
-  {
-    if (isRollupQuery) {
-      final String queryGranularityString =
-          query.context().getString(GroupByQuery.CTX_TIMESTAMP_RESULT_FIELD_GRANULARITY, "");
-
-      if (timeIsGroupByDimension((GroupByQuery) query, columnMappings) && !queryGranularityString.isEmpty()) {
-        final Granularity queryGranularity;
-
-        try {
-          queryGranularity = jsonMapper.readValue(queryGranularityString, Granularity.class);
-        }
-        catch (JsonProcessingException e) {
-          throw new RuntimeException(e);
-        }
-
-        return new ArbitraryGranularitySpec(queryGranularity, true, Intervals.ONLY_ETERNITY);
-      }
-      return new ArbitraryGranularitySpec(Granularities.NONE, true, Intervals.ONLY_ETERNITY);
-    } else {
-      return new ArbitraryGranularitySpec(Granularities.NONE, false, Intervals.ONLY_ETERNITY);
-    }
-  }
-
-  /**
-   * Checks that a {@link GroupByQuery} is grouping on the primary time column.
-   * <p>
-   * The logic here is roundabout. First, we check which column in the {@link GroupByQuery} corresponds to the
-   * output column {@link ColumnHolder#TIME_COLUMN_NAME}, using our {@link ColumnMappings}. Then, we check for the
-   * presence of an optimization done in {@link DruidQuery#toGroupByQuery()}, where the context parameter
-   * {@link GroupByQuery#CTX_TIMESTAMP_RESULT_FIELD} and various related parameters are set when one of the dimensions
-   * is detected to be a time-floor. Finally, we check that the name of that dimension, and the name of our time field
-   * from {@link ColumnMappings}, are the same.
-   */
-  private static boolean timeIsGroupByDimension(GroupByQuery groupByQuery, ColumnMappings columnMappings)
-  {
-    final IntList positions = columnMappings.getOutputColumnsByName(ColumnHolder.TIME_COLUMN_NAME);
-
-    if (positions.size() == 1) {
-      final String queryTimeColumn = columnMappings.getQueryColumnName(positions.getInt(0));
-      return queryTimeColumn.equals(groupByQuery.context().getString(GroupByQuery.CTX_TIMESTAMP_RESULT_FIELD));
-    } else {
-      return false;
-    }
-  }
-
-  /**
-   * Whether a native query represents an ingestion with rollup.
-   * <p>
-   * Checks for three things:
-   * <p>
-   * - The query must be a {@link GroupByQuery}, because rollup requires columns to be split into dimensions and
-   * aggregations.
-   * - The query must not finalize aggregations, because rollup requires inserting the intermediate type of
-   * complex aggregations, not the finalized type. (So further rollup is possible.)
-   * - The query must explicitly disable {@link GroupByQueryConfig#CTX_KEY_ENABLE_MULTI_VALUE_UNNESTING}, because
-   * groupBy on multi-value dimensions implicitly unnests, which is not desired behavior for rollup at ingestion time
-   * (rollup expects multi-value dimensions to be treated as arrays).
-   */
-  private static boolean isRollupQuery(Query<?> query)
-  {
-    return query instanceof GroupByQuery
-           && !MultiStageQueryContext.isFinalizeAggregations(query.context())
-           && !query.context().getBoolean(GroupByQueryConfig.CTX_KEY_ENABLE_MULTI_VALUE_UNNESTING, true);
-  }
-
-  private static boolean isInlineResults(final MSQSpec querySpec)
-  {
-    return querySpec.getDestination() instanceof TaskReportMSQDestination
-           || querySpec.getDestination() instanceof DurableStorageMSQDestination;
   }
 
   private static Pair<List<DimensionSchema>, List<AggregatorFactory>> makeDimensionsAndAggregatorsForIngestion(
@@ -503,20 +346,20 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
 
   @SuppressWarnings("unchecked")
   private static QueryDefinition makeQueryDefinition(
-      final String queryId,
-      @SuppressWarnings("rawtypes") final QueryKit toolKit,
+      final QueryKitSpec queryKitSpec,
       final MSQSpec querySpec,
-      final ObjectMapper jsonMapper
+      final ObjectMapper jsonMapper,
+      final ResultsContext resultsContext
   )
   {
     final MSQTuningConfig tuningConfig = querySpec.getTuningConfig();
     final ColumnMappings columnMappings = querySpec.getColumnMappings();
     final Query<?> queryToPlan;
-    final ShuffleSpecFactory shuffleSpecFactory;
+    final ShuffleSpecFactory resultShuffleSpecFactory;
 
     if (MSQControllerTask.isIngestion(querySpec)) {
-      shuffleSpecFactory = querySpec.getDestination()
-                                    .getShuffleSpecFactory(tuningConfig.getRowsPerSegment());
+      resultShuffleSpecFactory = querySpec.getDestination()
+                                          .getShuffleSpecFactory(tuningConfig.getRowsPerSegment());
 
       if (!columnMappings.hasUniqueOutputColumnNames()) {
         // We do not expect to hit this case in production, because the SQL validator checks that column names
@@ -540,22 +383,19 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
         queryToPlan = querySpec.getQuery();
       }
     } else {
-      shuffleSpecFactory = querySpec.getDestination()
-                                    .getShuffleSpecFactory(
-                                        MultiStageQueryContext.getRowsPerPage(querySpec.getQuery().context())
-                                    );
+      resultShuffleSpecFactory =
+          querySpec.getDestination()
+                   .getShuffleSpecFactory(MultiStageQueryContext.getRowsPerPage(querySpec.getQuery().context()));
       queryToPlan = querySpec.getQuery();
     }
 
     final QueryDefinition queryDef;
 
     try {
-      queryDef = toolKit.makeQueryDefinition(
-          queryId,
+      queryDef = queryKitSpec.getQueryKit().makeQueryDefinition(
+          queryKitSpec,
           queryToPlan,
-          toolKit,
-          shuffleSpecFactory,
-          tuningConfig.getMaxNumWorkers(),
+          resultShuffleSpecFactory,
           0
       );
     }
@@ -568,9 +408,6 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     }
 
     if (MSQControllerTask.isIngestion(querySpec)) {
-      final RowSignature querySignature = queryDef.getFinalStageDefinition().getSignature();
-      final ClusterBy queryClusterBy = queryDef.getFinalStageDefinition().getClusterBy();
-
       // Find the stage that provides shuffled input to the final segment-generation stage.
       StageDefinition finalShuffleStageDef = queryDef.getFinalStageDefinition();
 
@@ -587,7 +424,7 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
 
       // Add all query stages.
       // Set shuffleCheckHasMultipleValues on the stage that serves as input to the final segment-generation stage.
-      final QueryDefinitionBuilder builder = QueryDefinition.builder();
+      final QueryDefinitionBuilder builder = QueryDefinition.builder(queryKitSpec.getQueryId());
 
       for (final StageDefinition stageDef : queryDef.getStageDefinitions()) {
         if (stageDef.equals(finalShuffleStageDef)) {
@@ -598,27 +435,21 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       }
 
       // Then, add a segment-generation stage.
-      final DataSchema dataSchema =
-          generateDataSchema(querySpec, querySignature, queryClusterBy, columnMappings, jsonMapper);
+      final DataSourceMSQDestination destination = (DataSourceMSQDestination) querySpec.getDestination();
 
-      builder.add(
-          StageDefinition.builder(queryDef.getNextStageNumber())
-                         .inputs(new StageInputSpec(queryDef.getFinalStageDefinition().getStageNumber()))
-                         .maxWorkerCount(tuningConfig.getMaxNumWorkers())
-                         .processorFactory(
-                             new SegmentGeneratorFrameProcessorFactory(
-                                 dataSchema,
-                                 columnMappings,
-                                 tuningConfig
-                             )
-                         )
-      );
-
-      return builder.build();
-    } else if (querySpec.getDestination() instanceof TaskReportMSQDestination) {
+      return builder.add(
+                        destination.getTerminalStageSpec()
+                                   .constructFinalStage(
+                                       queryDef,
+                                       querySpec,
+                                       jsonMapper
+                                   )
+                    )
+                    .build();
+    } else if (MSQControllerTask.writeFinalResultsToTaskReport(querySpec)) {
       return queryDef;
-    } else if (querySpec.getDestination() instanceof DurableStorageMSQDestination) {
-      return ControllerUtil.queryDefinitionForDurableStorage(queryDef, tuningConfig);
+    } else if (MSQControllerTask.writeFinalStageResultsToDurableStorage(querySpec)) {
+      return ControllerUtil.queryDefinitionForDurableStorage(queryDef, tuningConfig, queryKitSpec);
     } else if (MSQControllerTask.isExport(querySpec)) {
       final ExportMSQDestination exportMSQDestination = (ExportMSQDestination) querySpec.getDestination();
       final ExportStorageProvider exportStorageProvider = exportMSQDestination.getExportStorageProvider();
@@ -644,7 +475,7 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
 
 
       final ResultFormat resultFormat = exportMSQDestination.getResultFormat();
-      final QueryDefinitionBuilder builder = QueryDefinition.builder();
+      final QueryDefinitionBuilder builder = QueryDefinition.builder(queryKitSpec.getQueryId());
       builder.addAll(queryDef);
       builder.add(StageDefinition.builder(queryDef.getNextStageNumber())
                                  .inputs(new StageInputSpec(queryDef.getFinalStageDefinition().getStageNumber()))
@@ -652,10 +483,11 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
                                  .signature(queryDef.getFinalStageDefinition().getSignature())
                                  .shuffleSpec(null)
                                  .processorFactory(new ExportResultsFrameProcessorFactory(
-                                     queryId,
+                                     queryKitSpec.getQueryId(),
                                      exportStorageProvider,
                                      resultFormat,
-                                     columnMappings
+                                     columnMappings,
+                                     resultsContext
                                  ))
       );
       return builder.build();
@@ -664,26 +496,123 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     }
   }
 
-  @Override
-  public String id()
+  private static Function<Set<DataSegment>, Set<DataSegment>> addCompactionStateToSegments(
+      MSQSpec querySpec,
+      ObjectMapper jsonMapper,
+      DataSchema dataSchema,
+      @Nullable ShardSpec shardSpec,
+      @Nullable ClusterBy clusterBy,
+      String queryId
+  )
   {
-    return task.getId();
+    final MSQTuningConfig tuningConfig = querySpec.getTuningConfig();
+    PartitionsSpec partitionSpec;
+
+    // shardSpec is absent in the absence of segments, which happens when only tombstones are generated by an
+    // MSQControllerTask.
+    if (shardSpec != null) {
+      if (Objects.equals(shardSpec.getType(), ShardSpec.Type.RANGE)) {
+        List<String> partitionDimensions = ((DimensionRangeShardSpec) shardSpec).getDimensions();
+        // Effective maxRowsPerSegment is propagated as rowsPerSegment in MSQ
+        partitionSpec = new DimensionRangePartitionsSpec(
+            null,
+            tuningConfig.getRowsPerSegment(),
+            partitionDimensions,
+            false
+        );
+      } else if (Objects.equals(shardSpec.getType(), ShardSpec.Type.NUMBERED)) {
+        // MSQ tasks don't use maxTotalRows. Hence using LONG.MAX_VALUE.
+        partitionSpec = new DynamicPartitionsSpec(tuningConfig.getRowsPerSegment(), Long.MAX_VALUE);
+      } else {
+        // SingleDimenionShardSpec and other shard specs are never created in MSQ.
+        throw new MSQException(
+            UnknownFault.forMessage(
+                StringUtils.format(
+                    "Query[%s] cannot store compaction state in segments as shard spec of unsupported type[%s].",
+                    queryId,
+                    shardSpec.getType()
+                )));
+      }
+    } else if (clusterBy != null && !clusterBy.getColumns().isEmpty()) {
+      // Effective maxRowsPerSegment is propagated as rowsPerSegment in MSQ
+      partitionSpec = new DimensionRangePartitionsSpec(
+          null,
+          tuningConfig.getRowsPerSegment(),
+          clusterBy.getColumns()
+                   .stream()
+                   .map(KeyColumn::columnName).collect(Collectors.toList()),
+          false
+      );
+    } else {
+      partitionSpec = new DynamicPartitionsSpec(tuningConfig.getRowsPerSegment(), Long.MAX_VALUE);
+    }
+
+    Granularity segmentGranularity = ((DataSourceMSQDestination) querySpec.getDestination())
+        .getSegmentGranularity();
+
+    GranularitySpec granularitySpec = new UniformGranularitySpec(
+        segmentGranularity,
+        QueryContext.of(querySpec.getQuery().getContext())
+                    .getGranularity(DruidSqlInsert.SQL_INSERT_QUERY_GRANULARITY, jsonMapper),
+        dataSchema.getGranularitySpec().isRollup(),
+        // Not using dataSchema.getGranularitySpec().inputIntervals() as that always has ETERNITY
+        ((DataSourceMSQDestination) querySpec.getDestination()).getReplaceTimeChunks()
+    );
+
+    DimensionsSpec dimensionsSpec = dataSchema.getDimensionsSpec();
+    Map<String, Object> transformSpec = TransformSpec.NONE.equals(dataSchema.getTransformSpec())
+                                        ? null
+                                        : new ClientCompactionTaskTransformSpec(
+                                            dataSchema.getTransformSpec().getFilter()
+                                        ).asMap(jsonMapper);
+    List<Object> metricsSpec = Collections.emptyList();
+
+    if (querySpec.getQuery() instanceof GroupByQuery) {
+      // For group-by queries, the aggregators are transformed to their combining factories in the dataschema, resulting
+      // in a mismatch between schema in compaction spec and the one in compaction state. Sourcing the original
+      // AggregatorFactory definition for aggregators in the dataSchema, therefore, directly from the querySpec.
+      GroupByQuery groupByQuery = (GroupByQuery) querySpec.getQuery();
+      // Collect all aggregators that are part of the current dataSchema, since a non-rollup query (isRollup() is false)
+      // moves metrics columns to dimensions in the final schema.
+      Set<String> aggregatorsInDataSchema = Arrays.stream(dataSchema.getAggregators())
+                                                  .map(AggregatorFactory::getName)
+                                                  .collect(
+                                                      Collectors.toSet());
+      metricsSpec = new ArrayList<>(
+          groupByQuery.getAggregatorSpecs()
+                      .stream()
+                      .filter(aggregatorFactory -> aggregatorsInDataSchema.contains(aggregatorFactory.getName()))
+                      .collect(Collectors.toList())
+      );
+    }
+
+    IndexSpec indexSpec = tuningConfig.getIndexSpec();
+
+    log.info("Query[%s] storing compaction state in segments.", queryId);
+
+    return CompactionState.addCompactionStateToSegments(
+        partitionSpec,
+        dimensionsSpec,
+        metricsSpec,
+        transformSpec,
+        indexSpec.asMap(jsonMapper),
+        granularitySpec.asMap(jsonMapper)
+    );
   }
 
   @Override
-  public MSQControllerTask task()
+  protected boolean isNativeQuery()
   {
-    return task;
+    return false;
   }
 
   @Override
-  public TaskStatus runTask(final Closer closer)
+  public MSQTaskReportPayload runInternal(final QueryListener queryListener, final Closer closer)
   {
     QueryDefinition queryDef = null;
     ControllerQueryKernel queryKernel = null;
     ListenableFuture<?> workerTaskRunnerFuture = null;
     CounterSnapshotsTree countersSnapshot = null;
-    Yielder<Object[]> resultsYielder = null;
     Throwable exceptionEncountered = null;
 
     final TaskState taskStateForReport;
@@ -692,17 +621,25 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     try {
       // Planning-related: convert the native query from MSQSpec into a multi-stage QueryDefinition.
       this.queryStartTime = DateTimes.nowUtc();
+      context.registerController(this, closer);
+
       queryDef = initializeQueryDefAndState(closer);
 
-      final InputSpecSlicerFactory inputSpecSlicerFactory = makeInputSpecSlicerFactory(makeDataSegmentTimelineView());
-
       // Execution-related: run the multi-stage QueryDefinition.
+      final InputSpecSlicerFactory inputSpecSlicerFactory =
+          makeInputSpecSlicerFactory(context.newTableInputSpecSlicer(workerManager));
+
       final Pair<ControllerQueryKernel, ListenableFuture<?>> queryRunResult =
-          new RunQueryUntilDone(queryDef, inputSpecSlicerFactory, closer).run();
+          new RunQueryUntilDone(
+              queryDef,
+              queryKernelConfig,
+              inputSpecSlicerFactory,
+              queryListener,
+              closer
+          ).run();
 
       queryKernel = Preconditions.checkNotNull(queryRunResult.lhs);
       workerTaskRunnerFuture = Preconditions.checkNotNull(queryRunResult.rhs);
-      resultsYielder = getFinalResultsYielder(queryDef, queryKernel);
       handleQueryResults(queryDef, queryKernel);
     }
     catch (Throwable e) {
@@ -727,20 +664,24 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     } else {
       // Query failure. Generate an error report and log the error(s) we encountered.
       final String selfHost = MSQTasks.getHostFromSelfNode(selfDruidNode);
-      final MSQErrorReport controllerError =
-          exceptionEncountered != null
-          ? MSQErrorReport.fromException(
-              id(),
-              selfHost,
-              null,
-              exceptionEncountered,
-              task.getQuerySpec().getColumnMappings()
-          )
-          : null;
+      final MSQErrorReport controllerError;
+
+      if (exceptionEncountered != null) {
+        controllerError = MSQErrorReport.fromException(
+            queryId(),
+            selfHost,
+            null,
+            exceptionEncountered,
+            querySpec.getColumnMappings()
+        );
+      } else {
+        controllerError = null;
+      }
+
       MSQErrorReport workerError = workerErrorRef.get();
 
       taskStateForReport = TaskState.FAILED;
-      errorForReport = MSQTasks.makeErrorReport(id(), selfHost, controllerError, workerError);
+      errorForReport = MSQTasks.makeErrorReport(queryId(), selfHost, controllerError, workerError);
 
       // Log the errors we encountered.
       if (controllerError != null) {
@@ -751,33 +692,16 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
         log.warn("Worker: %s", MSQTasks.errorReportToLogMessage(workerError));
       }
     }
-    MSQResultsReport resultsReport = null;
     if (queryKernel != null && queryKernel.isSuccess()) {
-      // If successful, encourage the tasks to exit successfully.
-      // get results before posting finish to the tasks.
-      if (resultsYielder != null) {
-        resultsReport = ControllerUtil.makeResultsTaskReport(
-            queryDef,
-            resultsYielder,
-            task.getQuerySpec().getColumnMappings(),
-            task.getSqlTypeNames(),
-            MultiStageQueryContext.getSelectDestination(task.getQuerySpec().getQuery().context())
-        );
-        try {
-          resultsYielder.close();
-        }
-        catch (IOException e) {
-          throw new RuntimeException("Unable to fetch results of various worker tasks successfully", e);
-        }
-      } else {
-        resultsReport = null;
-      }
-      postFinishToAllTasks();
-      workerTaskLauncher.stop(false);
+      // If successful, encourage workers to exit successfully.
+      // Only send this command to participating workers. For task-based queries, this is all tasks, since tasks
+      // are launched only when needed. For Dart, this is any servers that were actually assigned work items.
+      postFinishToWorkers(queryKernel.getAllParticipatingWorkers());
+      workerManager.stop(false);
     } else {
       // If not successful, cancel running tasks.
-      if (workerTaskLauncher != null) {
-        workerTaskLauncher.stop(true);
+      if (workerManager != null) {
+        workerManager.stop(true);
       }
     }
 
@@ -792,9 +716,8 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       }
     }
 
-    boolean shouldWaitForSegmentLoad = MultiStageQueryContext.shouldWaitForSegmentLoad(task.getQuerySpec()
-                                                                                           .getQuery()
-                                                                                           .context());
+    boolean shouldWaitForSegmentLoad = MultiStageQueryContext.shouldWaitForSegmentLoad(querySpec.getQuery().context());
+
 
     return finalizeTaskRunning(
         queryKernel,
@@ -802,111 +725,70 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
         queryDef,
         taskStateForReport,
         errorForReport,
-        countersSnapshot,
-        resultsReport
+        countersSnapshot
+    );
+  }
+
+  @Override
+  protected ControllerQueryResultsReader instantiateResultsReader(
+      ReadableFrameChannel in,
+      FrameReader frameReader,
+      ColumnMappings columnMappings,
+      QueryListener queryListener
+  )
+  {
+    return new ControllerQueryResultsReader(
+        in,
+        frameReader,
+        columnMappings,
+        resultsContext,
+        context.jsonMapper(),
+        queryListener,
+        SqlStatementResourceHelper.INSTANCE
     );
   }
 
   private QueryDefinition initializeQueryDefAndState(final Closer closer)
   {
-    final QueryContext queryContext = task.getQuerySpec().getQuery().context();
-    if (isFaultToleranceEnabled) {
-      if (!queryContext.containsKey(MultiStageQueryContext.CTX_DURABLE_SHUFFLE_STORAGE)) {
-        // if context key not set, enable durableStorage automatically.
-        isDurableStorageEnabled = true;
-      } else {
-        // if context key is set, and durableStorage is turned on.
-        if (MultiStageQueryContext.isDurableStorageEnabled(queryContext)) {
-          isDurableStorageEnabled = true;
-        } else {
-          throw new MSQException(
-              UnknownFault.forMessage(
-                  StringUtils.format(
-                      "Context param[%s] cannot be explicitly set to false when context param[%s] is"
-                      + " set to true. Either remove the context param[%s] or explicitly set it to true.",
-                      MultiStageQueryContext.CTX_DURABLE_SHUFFLE_STORAGE,
-                      MultiStageQueryContext.CTX_FAULT_TOLERANCE,
-                      MultiStageQueryContext.CTX_DURABLE_SHUFFLE_STORAGE
-                  )));
-        }
-      }
-    } else {
-      isDurableStorageEnabled = MultiStageQueryContext.isDurableStorageEnabled(queryContext);
-    }
-
-    log.debug("Task [%s] durable storage mode is set to %s.", task.getId(), isDurableStorageEnabled);
-    log.debug("Task [%s] fault tolerance mode is set to %s.", task.getId(), isFaultToleranceEnabled);
-
     this.selfDruidNode = context.selfNode();
-    context.registerController(this, closer);
+    this.netClient = closer.register(new ExceptionWrappingWorkerClient(context.newWorkerClient()));
+    this.queryKernelConfig = context.queryKernelConfig(queryId, querySpec);
 
-    this.netClient = new ExceptionWrappingWorkerClient(context.taskClientFor(this));
-    closer.register(netClient::close);
-
+    final QueryContext queryContext = querySpec.getQuery().context();
     final QueryDefinition queryDef = makeQueryDefinition(
-        id(),
-        makeQueryControllerToolKit(),
-        task.getQuerySpec(),
-        context.jsonMapper()
+        context.makeQueryKitSpec(makeQueryControllerToolKit(), queryId, querySpec, queryKernelConfig),
+        querySpec,
+        context.jsonMapper(),
+        resultsContext
     );
+
+    if (log.isDebugEnabled()) {
+      try {
+        log.debug(
+            "Query[%s] definition: %s",
+            queryDef.getQueryId(),
+            context.jsonMapper().writerWithDefaultPrettyPrinter().writeValueAsString(queryDef)
+        );
+      }
+      catch (JsonProcessingException e) {
+        throw new RuntimeException(e);
+      }
+    }
 
     QueryValidator.validateQueryDef(queryDef);
     queryDefRef.set(queryDef);
+    workerManager = initWorkerManager();
 
-    final long maxParseExceptions = task.getQuerySpec().getQuery().context().getLong(
-        MSQWarnings.CTX_MAX_PARSE_EXCEPTIONS_ALLOWED,
-        MSQWarnings.DEFAULT_MAX_PARSE_EXCEPTIONS_ALLOWED
-    );
-
-    ImmutableMap.Builder<String, Object> taskContextOverridesBuilder = ImmutableMap.builder();
-    taskContextOverridesBuilder
-        .put(MultiStageQueryContext.CTX_DURABLE_SHUFFLE_STORAGE, isDurableStorageEnabled)
-        .put(MSQWarnings.CTX_MAX_PARSE_EXCEPTIONS_ALLOWED, maxParseExceptions);
-
-    if (!MSQControllerTask.isIngestion(task.getQuerySpec())) {
-      if (MSQControllerTask.writeResultsToDurableStorage(task.getQuerySpec())) {
-        taskContextOverridesBuilder.put(
-            MultiStageQueryContext.CTX_SELECT_DESTINATION,
-            MSQSelectDestination.DURABLESTORAGE.getName()
-        );
-      } else {
-        // we need not pass the value 'TaskReport' to the worker since the worker impl does not do anything in such a case.
-        // but we are passing it anyway for completeness
-        taskContextOverridesBuilder.put(
-            MultiStageQueryContext.CTX_SELECT_DESTINATION,
-            MSQSelectDestination.TASKREPORT.getName()
-        );
-      }
+    if (queryKernelConfig.isFaultTolerant() && !(workerManager instanceof RetryCapableWorkerManager)) {
+      // Not expected to happen, since all WorkerManager impls are currently retry-capable. Defensive check
+      // for future-proofing.
+      throw DruidException.defensive(
+          "Cannot run with fault tolerance since workerManager class[%s] does not support retrying",
+          workerManager.getClass().getName()
+      );
     }
 
-    taskContextOverridesBuilder.put(
-        MultiStageQueryContext.CTX_IS_REINDEX,
-        MSQControllerTask.isReplaceInputDataSourceTask(task.getQuerySpec())
-    );
-
-    // propagate the controller's tags to the worker task for enhanced metrics reporting
-    Map<String, Object> tags = task.getContextValue(DruidMetrics.TAGS);
-    if (tags != null) {
-      taskContextOverridesBuilder.put(DruidMetrics.TAGS, tags);
-    }
-
-    this.workerTaskLauncher = new MSQWorkerTaskLauncher(
-        id(),
-        task.getDataSource(),
-        context,
-        (failedTask, fault) -> {
-          if (isFaultToleranceEnabled && ControllerQueryKernel.isRetriableFault(fault)) {
-            addToKernelManipulationQueue((kernel) -> {
-              addToRetryQueue(kernel, failedTask.getWorkerNumber(), fault);
-            });
-          } else {
-            throw new MSQException(fault);
-          }
-        },
-        taskContextOverridesBuilder.build(),
-        // 10 minutes +- 2 minutes jitter
-        TimeUnit.SECONDS.toMillis(600 + ThreadLocalRandom.current().nextInt(-4, 5) * 30L)
-    );
+    final long maxParseExceptions = MultiStageQueryContext.getMaxParseExceptions(queryContext);
 
     this.faultsExceededChecker = new FaultsExceededChecker(
         ImmutableMap.of(CannotParseExternalDataFault.CODE, maxParseExceptions)
@@ -923,11 +805,11 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
                 )
             )
     );
-    this.workerMemoryParameters = WorkerMemoryParameters.createProductionInstanceForController(context.injector());
     this.workerSketchFetcher = new WorkerSketchFetcher(
         netClient,
-        workerTaskLauncher,
-        isFaultToleranceEnabled
+        workerManager,
+        queryKernelConfig.isFaultTolerant(),
+        MultiStageQueryContext.getSketchEncoding(querySpec.getQuery().context())
     );
     closer.register(workerSketchFetcher::close);
 
@@ -938,16 +820,16 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
    * Publish the list of segments. Additionally, if {@link DataSourceMSQDestination#isReplaceTimeChunks()},
    * also drop all other segments within the replacement intervals.
    */
-  private void publishAllSegments(final Set<DataSegment> segments) throws IOException
+  private void publishAllSegments(
+      final Set<DataSegment> segments,
+      Function<Set<DataSegment>, Set<DataSegment>> compactionStateAnnotateFunction
+  ) throws IOException
   {
     final DataSourceMSQDestination destination =
-        (DataSourceMSQDestination) task.getQuerySpec().getDestination();
+        (DataSourceMSQDestination) querySpec.getDestination();
     final Set<DataSegment> segmentsWithTombstones = new HashSet<>(segments);
     int numTombstones = 0;
-    final TaskLockType taskLockType = MultiStageQueryContext.validateAndGetTaskLockType(
-        QueryContext.of(task.getQuerySpec().getQuery().getContext()),
-        destination.isReplaceTimeChunks()
-    );
+    final TaskLockType taskLockType = context.taskLockType();
 
     if (destination.isReplaceTimeChunks()) {
       final List<Interval> intervalsToDrop = findIntervalsToDrop(Preconditions.checkNotNull(segments, "segments"));
@@ -958,7 +840,7 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
           Set<DataSegment> tombstones = tombstoneHelper.computeTombstoneSegmentsForReplace(
               intervalsToDrop,
               destination.getReplaceTimeChunks(),
-              task.getDataSource(),
+              destination.getDataSource(),
               destination.getSegmentGranularity(),
               Limits.MAX_PARTITION_BUCKETS
           );
@@ -979,20 +861,20 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
         // This should not need a segment load wait as segments are marked as unused immediately.
         for (final Interval interval : intervalsToDrop) {
           context.taskActionClient()
-                 .submit(new MarkSegmentsAsUnusedAction(task.getDataSource(), interval));
+                 .submit(new MarkSegmentsAsUnusedAction(destination.getDataSource(), interval));
         }
       } else {
-        if (MultiStageQueryContext.shouldWaitForSegmentLoad(task.getQuerySpec().getQuery().context())) {
-          initLoadWaiter(segmentsWithTombstones);
+        if (MultiStageQueryContext.shouldWaitForSegmentLoad(querySpec.getQuery().context())) {
+          initLoadWaiter(segmentsWithTombstones, destination);
         }
         performSegmentPublish(
             context.taskActionClient(),
-            createOverwriteAction(taskLockType, segmentsWithTombstones)
+            createOverwriteAction(taskLockType, compactionStateAnnotateFunction.apply(segmentsWithTombstones))
         );
       }
     } else if (!segments.isEmpty()) {
-      if (MultiStageQueryContext.shouldWaitForSegmentLoad(task.getQuerySpec().getQuery().context())) {
-        initLoadWaiter(segments);
+      if (MultiStageQueryContext.shouldWaitForSegmentLoad(querySpec.getQuery().context())) {
+        initLoadWaiter(segments, destination);
       }
       // Append mode.
       performSegmentPublish(
@@ -1001,9 +883,9 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       );
     }
 
-    task.emitMetric(context.emitter(), "ingest/tombstones/count", numTombstones);
+    context.emitMetric("ingest/tombstones/count", numTombstones);
     // Include tombstones in the reported segments count
-    task.emitMetric(context.emitter(), "ingest/segments/count", segmentsWithTombstones.size());
+    context.emitMetric("ingest/segments/count", segmentsWithTombstones.size());
   }
 
   private TaskAction<SegmentPublishResult> createOverwriteAction(
@@ -1028,69 +910,12 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
   {
     // Safe to cast because publishAllSegments is only called for dataSource destinations.
     final DataSourceMSQDestination destination =
-        (DataSourceMSQDestination) task.getQuerySpec().getDestination();
+        (DataSourceMSQDestination) querySpec.getDestination();
     final List<Interval> replaceIntervals =
         new ArrayList<>(JodaUtils.condenseIntervals(destination.getReplaceTimeChunks()));
     final List<Interval> publishIntervals =
         JodaUtils.condenseIntervals(Iterables.transform(publishedSegments, DataSegment::getInterval));
     return IntervalUtils.difference(replaceIntervals, publishIntervals);
-  }
-
-  @Nullable
-  private Yielder<Object[]> getFinalResultsYielder(
-      final QueryDefinition queryDef,
-      final ControllerQueryKernel queryKernel
-  )
-  {
-    if (queryKernel.isSuccess() && isInlineResults(task.getQuerySpec())) {
-      final StageId finalStageId = queryKernel.getStageId(queryDef.getFinalStageDefinition().getStageNumber());
-      final List<String> taskIds = getTaskIds();
-      final Closer closer = Closer.create();
-
-      final ListeningExecutorService resultReaderExec =
-          MoreExecutors.listeningDecorator(Execs.singleThreaded("result-reader-%d"));
-      closer.register(resultReaderExec::shutdownNow);
-
-      final InputChannelFactory inputChannelFactory;
-
-      if (isDurableStorageEnabled || MSQControllerTask.writeResultsToDurableStorage(task.getQuerySpec())) {
-        inputChannelFactory = DurableStorageInputChannelFactory.createStandardImplementation(
-            id(),
-            MSQTasks.makeStorageConnector(
-                context.injector()),
-            closer,
-            MSQControllerTask.writeResultsToDurableStorage(task.getQuerySpec())
-        );
-      } else {
-        inputChannelFactory = new WorkerInputChannelFactory(netClient, () -> taskIds);
-      }
-
-      final InputChannels inputChannels = new InputChannelsImpl(
-          queryDef,
-          queryKernel.getResultPartitionsForStage(finalStageId),
-          inputChannelFactory,
-          () -> ArenaMemoryAllocator.createOnHeap(5_000_000),
-          new FrameProcessorExecutor(resultReaderExec),
-          null
-      );
-
-      return Yielders.each(
-          Sequences.concat(ControllerUtil.createFrameChannelSequences(queryKernel, inputChannels, finalStageId).collect(
-                       Collectors.toList()))
-                   .flatMap(
-                       frame ->
-                           SqlStatementResourceHelper.getResultSequence(
-                               task,
-                               queryDef.getFinalStageDefinition(),
-                               frame,
-                               context.jsonMapper()
-                           )
-                   )
-                   .withBaggage(resultReaderExec::shutdownNow)
-      );
-    } else {
-      return null;
-    }
   }
 
   private void handleQueryResults(
@@ -1101,49 +926,51 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     if (!queryKernel.isSuccess()) {
       return;
     }
-    if (MSQControllerTask.isIngestion(task.getQuerySpec())) {
+    if (MSQControllerTask.isIngestion(querySpec)) {
       // Publish segments if needed.
       final StageId finalStageId = queryKernel.getStageId(queryDef.getFinalStageDefinition().getStageNumber());
+      Function<Set<DataSegment>, Set<DataSegment>> compactionStateAnnotateFunction = Function.identity();
 
       //noinspection unchecked
       @SuppressWarnings("unchecked")
       Set<DataSegment> segments = (Set<DataSegment>) queryKernel.getResultObjectForStage(finalStageId);
 
-      boolean storeCompactionState = QueryContext.of(task.getQuerySpec().getQuery().getContext())
+      boolean storeCompactionState = QueryContext.of(querySpec.getQuery().getContext())
                                                  .getBoolean(
                                                      Tasks.STORE_COMPACTION_STATE_KEY,
                                                      Tasks.DEFAULT_STORE_COMPACTION_STATE
                                                  );
 
-      if (!segments.isEmpty() && storeCompactionState) {
-        DataSourceMSQDestination destination = (DataSourceMSQDestination) task.getQuerySpec().getDestination();
+      if (storeCompactionState) {
+        DataSourceMSQDestination destination = (DataSourceMSQDestination) querySpec.getDestination();
         if (!destination.isReplaceTimeChunks()) {
           // Store compaction state only for replace queries.
           log.warn(
-              "storeCompactionState flag set for a non-REPLACE query [%s]. Ignoring the flag for now.",
+              "Ignoring storeCompactionState flag since it is set for a non-REPLACE query[%s].",
               queryDef.getQueryId()
           );
         } else {
           DataSchema dataSchema = ((SegmentGeneratorFrameProcessorFactory) queryKernel
               .getStageDefinition(finalStageId).getProcessorFactory()).getDataSchema();
 
-          ShardSpec shardSpec = segments.stream().findFirst().get().getShardSpec();
+          ShardSpec shardSpec = segments.isEmpty() ? null : segments.stream().findFirst().get().getShardSpec();
+          ClusterBy clusterBy = queryKernel.getStageDefinition(finalStageId).getClusterBy();
 
-          Function<Set<DataSegment>, Set<DataSegment>> compactionStateAnnotateFunction = addCompactionStateToSegments(
-              task(),
+          compactionStateAnnotateFunction = addCompactionStateToSegments(
+              querySpec,
               context.jsonMapper(),
               dataSchema,
               shardSpec,
+              clusterBy,
               queryDef.getQueryId()
           );
-          segments = compactionStateAnnotateFunction.apply(segments);
         }
       }
       log.info("Query [%s] publishing %d segments.", queryDef.getQueryId(), segments.size());
-      publishAllSegments(segments);
-    } else if (MSQControllerTask.isExport(task.getQuerySpec())) {
+      publishAllSegments(segments, compactionStateAnnotateFunction);
+    } else if (MSQControllerTask.isExport(querySpec)) {
       // Write manifest file.
-      ExportMSQDestination destination = (ExportMSQDestination) task.getQuerySpec().getDestination();
+      ExportMSQDestination destination = (ExportMSQDestination) querySpec.getDestination();
       ExportMetadataManager exportMetadataManager = new ExportMetadataManager(destination.getExportStorageProvider());
 
       final StageId finalStageId = queryKernel.getStageId(queryDef.getFinalStageDefinition().getStageNumber());
@@ -1153,7 +980,10 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       Object resultObjectForStage = queryKernel.getResultObjectForStage(finalStageId);
       if (!(resultObjectForStage instanceof List)) {
         // This might occur if all workers are running on an older version. We are not able to write a manifest file in this case.
-        log.warn("Was unable to create manifest file due to ");
+        log.warn(
+            "Unable to create export manifest file. Received result[%s] from worker instead of a list of file names.",
+            resultObjectForStage
+        );
         return;
       }
       @SuppressWarnings("unchecked")
@@ -1161,76 +991,5 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       log.info("Query [%s] exported %d files.", queryDef.getQueryId(), exportedFiles.size());
       exportMetadataManager.writeMetadata(exportedFiles);
     }
-  }
-
-  private static Function<Set<DataSegment>, Set<DataSegment>> addCompactionStateToSegments(
-      MSQControllerTask task,
-      ObjectMapper jsonMapper,
-      DataSchema dataSchema,
-      ShardSpec shardSpec,
-      String queryId
-  )
-  {
-    final MSQTuningConfig tuningConfig = task.getQuerySpec().getTuningConfig();
-    PartitionsSpec partitionSpec;
-
-    if (Objects.equals(shardSpec.getType(), ShardSpec.Type.RANGE)) {
-      List<String> partitionDimensions = ((DimensionRangeShardSpec) shardSpec).getDimensions();
-      partitionSpec = new DimensionRangePartitionsSpec(
-          tuningConfig.getRowsPerSegment(),
-          null,
-          partitionDimensions,
-          false
-      );
-    } else if (Objects.equals(shardSpec.getType(), ShardSpec.Type.NUMBERED)) {
-      // MSQ tasks don't use maxTotalRows. Hence using LONG.MAX_VALUE.
-      partitionSpec = new DynamicPartitionsSpec(tuningConfig.getRowsPerSegment(), Long.MAX_VALUE);
-    } else {
-      // SingleDimenionShardSpec and other shard specs are never created in MSQ.
-      throw new MSQException(
-          UnknownFault.forMessage(
-              StringUtils.format(
-                  "Query[%s] cannot store compaction state in segments as shard spec of unsupported type[%s].",
-                  queryId,
-                  shardSpec.getType()
-              )));
-    }
-
-    Granularity segmentGranularity = ((DataSourceMSQDestination) task.getQuerySpec().getDestination())
-        .getSegmentGranularity();
-
-    GranularitySpec granularitySpec = new UniformGranularitySpec(
-        segmentGranularity,
-        dataSchema.getGranularitySpec().getQueryGranularity(),
-        dataSchema.getGranularitySpec().isRollup(),
-        dataSchema.getGranularitySpec().inputIntervals()
-    );
-
-    DimensionsSpec dimensionsSpec = dataSchema.getDimensionsSpec();
-    Map<String, Object> transformSpec = TransformSpec.NONE.equals(dataSchema.getTransformSpec())
-                                        ? null
-                                        : new ClientCompactionTaskTransformSpec(
-                                            dataSchema.getTransformSpec().getFilter()
-                                        ).asMap(jsonMapper);
-    List<Object> metricsSpec = dataSchema.getAggregators() == null
-                               ? null
-                               : jsonMapper.convertValue(
-                                   dataSchema.getAggregators(), new TypeReference<List<Object>>()
-                                   {
-                                   });
-
-
-    IndexSpec indexSpec = tuningConfig.getIndexSpec();
-
-    log.info("Query[%s] storing compaction state in segments.", queryId);
-
-    return CompactionState.addCompactionStateToSegments(
-        partitionSpec,
-        dimensionsSpec,
-        metricsSpec,
-        transformSpec,
-        indexSpec.asMap(jsonMapper),
-        granularitySpec.asMap(jsonMapper)
-    );
   }
 }

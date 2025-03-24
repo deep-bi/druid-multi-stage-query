@@ -32,8 +32,6 @@ import org.apache.druid.indexer.TaskState;
 import org.apache.druid.indexer.TaskStatusPlus;
 import org.apache.druid.indexer.report.TaskReport;
 import org.apache.druid.java.util.common.StringUtils;
-import org.apache.druid.java.util.common.guava.Sequences;
-import org.apache.druid.java.util.common.guava.Yielders;
 import org.apache.druid.java.util.http.client.response.StringFullResponseHolder;
 import org.apache.druid.msq.counters.ChannelCounters;
 import org.apache.druid.msq.counters.CounterSnapshots;
@@ -135,11 +133,11 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
                                                                     ColumnType.LONG
                                                                 )
                                                                 .add(
-                                                                    "alias",
+                                                                    "market",
                                                                     ColumnType.STRING
                                                                 )
                                                                 .add(
-                                                                    "market",
+                                                                    "alias",
                                                                     ColumnType.STRING
                                                                 )
                                                                 .build();
@@ -163,8 +161,8 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
               ImmutableMap.of(),
               ImmutableMap.of(),
               ImmutableMap.of(0, 1),
-              ImmutableMap.of(0, 1)
-
+              ImmutableMap.of(0, 1),
+              ImmutableMap.of()
           ),
           CounterSnapshotsTree.fromMap(ImmutableMap.of(
               0,
@@ -203,9 +201,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
                   SqlTypeName.VARCHAR,
                   SqlTypeName.VARCHAR
               ),
-              Yielders.each(
-                  Sequences.simple(
-                      RESULT_ROWS)),
+              RESULT_ROWS,
               null
           )
       )
@@ -406,7 +402,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
   @Test
   public void testMSQSelectAcceptedQuery()
   {
-    Response response = resource.doGetStatus(ACCEPTED_SELECT_MSQ_QUERY, makeOkRequest());
+    Response response = resource.doGetStatus(ACCEPTED_SELECT_MSQ_QUERY, false, true, makeOkRequest());
     Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
     Assertions.assertEquals(
         new NativeStatementResult(
@@ -440,7 +436,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
   public void testMSQSelectRunningQuery()
   {
 
-    Response response = resource.doGetStatus(RUNNING_SELECT_MSQ_QUERY, makeOkRequest());
+    Response response = resource.doGetStatus(RUNNING_SELECT_MSQ_QUERY, false, true, makeOkRequest());
     Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
     Assertions.assertEquals(
         new NativeStatementResult(
@@ -473,7 +469,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
   @Test
   public void testFinishedSelectMSQQuery() throws Exception
   {
-    Response response = resource.doGetStatus(FINISHED_SELECT_MSQ_QUERY, makeOkRequest());
+    Response response = resource.doGetStatus(FINISHED_SELECT_MSQ_QUERY, false, true, makeOkRequest());
     Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
     Assertions.assertEquals(objectMapper.writeValueAsString(new NativeStatementResult(
         FINISHED_SELECT_MSQ_QUERY,
@@ -540,7 +536,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
   public void testFailedMSQQuery()
   {
     assertExceptionMessage(
-        resource.doGetStatus(ERRORED_SELECT_MSQ_QUERY, makeOkRequest()),
+        resource.doGetStatus(ERRORED_SELECT_MSQ_QUERY, false, true, makeOkRequest()),
         FAILURE_MSG,
         Response.Status.OK
     );
@@ -566,7 +562,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         Response.Status.OK.getStatusCode(),
         resource.doGetStatus(
             RUNNING_SELECT_MSQ_QUERY,
-            makeExpectedReq(makeAuthResultForUser(SUPERUSER))
+            false, true, makeExpectedReq(makeAuthResultForUser(SUPERUSER))
         ).getStatus()
     );
     Assertions.assertEquals(
@@ -595,7 +591,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         Response.Status.FORBIDDEN.getStatusCode(),
         resource.doGetStatus(
             RUNNING_SELECT_MSQ_QUERY,
-            makeExpectedReq(differentUserAuthResult)
+            false, true, makeExpectedReq(differentUserAuthResult)
         ).getStatus()
     );
     Assertions.assertEquals(
@@ -624,7 +620,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         Response.Status.OK.getStatusCode(),
         resource.doGetStatus(
             RUNNING_SELECT_MSQ_QUERY,
-            makeExpectedReq(differentUserAuthResult)
+            false, true, makeExpectedReq(differentUserAuthResult)
         ).getStatus()
     );
     Assertions.assertEquals(
@@ -653,7 +649,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         Response.Status.FORBIDDEN.getStatusCode(),
         resource.doGetStatus(
             RUNNING_SELECT_MSQ_QUERY,
-            makeExpectedReq(differentUserAuthResult)
+            false, true, makeExpectedReq(differentUserAuthResult)
         ).getStatus()
     );
     Assertions.assertEquals(
@@ -682,7 +678,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         Response.Status.OK.getStatusCode(),
         resource.doGetStatus(
             RUNNING_SELECT_MSQ_QUERY,
-            makeExpectedReq(differentUserAuthResult)
+            false, true, makeExpectedReq(differentUserAuthResult)
         ).getStatus()
     );
     Assertions.assertEquals(
@@ -718,7 +714,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
 
     Assertions.assertEquals(
         Response.Status.NOT_FOUND.getStatusCode(),
-        resource.doGetStatus(taskIdNotFound, makeOkRequest()).getStatus()
+        resource.doGetStatus(taskIdNotFound, false, true, makeOkRequest()).getStatus()
     );
     Assertions.assertEquals(
         Response.Status.NOT_FOUND.getStatusCode(),

@@ -99,22 +99,18 @@ public class MSQNativeTaskQueryMaker
       MSQMode.populateDefaultQueryContext(msqMode, nativeQueryContext);
     }
 
-    Object segmentGranularity;
-    try {
-      segmentGranularity = Optional.ofNullable(queryContext.get(DruidSqlInsert.SQL_INSERT_SEGMENT_GRANULARITY))
-                                   .orElse(jsonMapper.writeValueAsString(DEFAULT_SEGMENT_GRANULARITY));
-    }
-    catch (JsonProcessingException e) {
-      // This would only be thrown if we are unable to serialize the DEFAULT_SEGMENT_GRANULARITY, which we don't expect
-      // to happen
-      throw DruidException.defensive()
-                          .build(
-                              e,
-                              "Unable to deserialize the DEFAULT_SEGMENT_GRANULARITY in MSQTaskQueryMaker. "
-                              + "This shouldn't have happened since the DEFAULT_SEGMENT_GRANULARITY object is guaranteed to be "
-                              + "serializable. Please raise an issue in case you are seeing this message while executing a query."
-                          );
-    }
+    Object segmentGranularity =
+        Optional.ofNullable(queryContext.get(DruidSqlInsert.SQL_INSERT_SEGMENT_GRANULARITY))
+                .orElseGet(() -> {
+                  try {
+                    return jsonMapper.writeValueAsString(DEFAULT_SEGMENT_GRANULARITY);
+                  }
+                  catch (JsonProcessingException e) {
+                    // This would only be thrown if we are unable to serialize the DEFAULT_SEGMENT_GRANULARITY,
+                    // which we don't expect to happen.
+                    throw DruidException.defensive().build(e, "Unable to serialize DEFAULT_SEGMENT_GRANULARITY");
+                  }
+                });
 
     final int maxNumTasks = MultiStageQueryContext.getMaxNumTasks(queryContext);
 
@@ -164,7 +160,9 @@ public class MSQNativeTaskQueryMaker
           targetDataSource.getDestinationName(),
           segmentGranularityObject,
           segmentSortOrder,
-          replaceTimeChunks
+          replaceTimeChunks,
+          null,
+          null // Used for ingestion only
       );
       MultiStageQueryContext.validateAndGetTaskLockType(
           queryContext,
@@ -185,7 +183,7 @@ public class MSQNativeTaskQueryMaker
                .columnMappings(columnMappings)
                .destination(destination)
                .assignmentStrategy(MultiStageQueryContext.getAssignmentStrategy(queryContext))
-               .tuningConfig(new MSQTuningConfig(maxNumWorkers, maxRowsInMemory, rowsPerSegment, indexSpec))
+               .tuningConfig(new MSQTuningConfig(maxNumWorkers, maxRowsInMemory, rowsPerSegment, null, indexSpec))
                .build();
 
     final MSQNativeControllerTask controllerTask = new MSQNativeControllerTask(

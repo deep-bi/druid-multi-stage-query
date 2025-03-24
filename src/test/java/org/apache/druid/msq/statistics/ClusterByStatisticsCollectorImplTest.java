@@ -19,7 +19,6 @@
 
 package org.apache.druid.msq.statistics;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -37,6 +36,7 @@ import org.apache.druid.indexing.common.task.batch.TooManyBucketsException;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.Pair;
 import org.apache.druid.java.util.common.StringUtils;
+import org.apache.druid.msq.statistics.serde.ClusterByStatisticsSnapshotSerde;
 import org.apache.druid.segment.TestHelper;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
@@ -48,7 +48,10 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.junit.internal.matchers.ThrowableMessageMatcher;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.math.RoundingMode;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -449,6 +452,26 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
           verifySnapshotSerialization(testName, collector);
         }
     );
+  }
+
+  @Test
+  public void testShouldDownsampleSingleBucket()
+  {
+    ClusterByStatisticsCollectorImpl clusterByStatisticsCollector =
+        (ClusterByStatisticsCollectorImpl) ClusterByStatisticsCollectorImpl.create(
+            CLUSTER_BY_XYZ_BUCKET_BY_X,
+            SIGNATURE,
+            35000,
+            500,
+            false,
+            false
+        );
+
+    clusterByStatisticsCollector.add(createKey(CLUSTER_BY_XYZ_BUCKET_BY_X, 2, 1, "value1"), 1);
+    clusterByStatisticsCollector.add(createKey(CLUSTER_BY_XYZ_BUCKET_BY_X, 2, 3, "value2"), 1);
+    clusterByStatisticsCollector.add(createKey(CLUSTER_BY_XYZ_BUCKET_BY_X, 1, 1, "Extremely long key string for unit test; Extremely long key string for unit test;"), 500);
+
+    Assert.assertTrue(clusterByStatisticsCollector.getTotalRetainedBytes() <= 35000);
   }
 
   @Test
@@ -948,6 +971,7 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
       final ClusterByStatisticsCollector collector
   )
   {
+    // Verify jackson serialization
     try {
       final ObjectMapper jsonMapper = TestHelper.makeJsonMapper();
       final ClusterByStatisticsSnapshot snapshot = collector.snapshot();
@@ -957,8 +981,15 @@ public class ClusterByStatisticsCollectorImplTest extends InitializedNullHandlin
       );
 
       Assert.assertEquals(StringUtils.format("%s: snapshot is serializable", testName), snapshot, snapshot2);
+
+      // Verify octet stream serialization
+      ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+      ClusterByStatisticsSnapshotSerde.serialize(byteArrayOutputStream, snapshot);
+
+      final ClusterByStatisticsSnapshot snapshot3 = ClusterByStatisticsSnapshotSerde.deserialize(ByteBuffer.wrap(byteArrayOutputStream.toByteArray()));
+      Assert.assertEquals(StringUtils.format("%s: snapshot is serializable", testName), snapshot, snapshot3);
     }
-    catch (JsonProcessingException e) {
+    catch (IOException e) {
       throw new RuntimeException(e);
     }
   }

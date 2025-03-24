@@ -35,7 +35,6 @@ import org.apache.druid.query.SegmentDescriptor;
 import org.apache.druid.query.groupby.GroupByQuery;
 import org.apache.druid.query.groupby.GroupByQueryQueryToolChest;
 import org.apache.druid.query.scan.ScanQuery;
-import org.apache.druid.query.scan.ScanQueryConfig;
 import org.apache.druid.query.scan.ScanQueryQueryToolChest;
 import org.apache.druid.query.timeseries.TimeseriesQuery;
 import org.apache.druid.query.timeseries.TimeseriesQueryQueryToolChest;
@@ -53,8 +52,7 @@ public class NativeMSQTestBase extends MSQTestBase
                                                                                                         .put(
                                                                                                             ScanQuery.class,
                                                                                                             new ScanQueryQueryToolChest(
-                                                                                                                new ScanQueryConfig(),
-                                                                                                                null
+                                                                                                                DefaultGenericQueryMetricsFactory.instance()
                                                                                                             )
                                                                                                         )
                                                                                                         .put(

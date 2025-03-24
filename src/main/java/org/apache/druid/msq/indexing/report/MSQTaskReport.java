@@ -31,15 +31,26 @@ public class MSQTaskReport implements TaskReport
 
   private final String taskId;
   private final MSQTaskReportPayload payload;
+  private final boolean isNative;
 
   @JsonCreator
   public MSQTaskReport(
       @JsonProperty("taskId") final String taskId,
-      @JsonProperty("payload") final MSQTaskReportPayload payload
+      @JsonProperty("payload") final MSQTaskReportPayload payload,
+      @JsonProperty("isNative") final boolean isNative
   )
   {
     this.taskId = taskId;
     this.payload = payload;
+    this.isNative = isNative;
+  }
+
+  public MSQTaskReport(
+      final String taskId,
+      final MSQTaskReportPayload payload
+  )
+  {
+    this(taskId, payload, false);
   }
 
   @Override
@@ -60,5 +71,11 @@ public class MSQTaskReport implements TaskReport
   public MSQTaskReportPayload getPayload()
   {
     return payload;
+  }
+
+  @JsonProperty
+  public boolean isNative()
+  {
+    return isNative;
   }
 }

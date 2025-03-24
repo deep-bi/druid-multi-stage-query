@@ -34,7 +34,6 @@ import org.apache.druid.indexing.common.actions.TaskActionClient;
 import org.apache.druid.indexing.common.config.TaskConfig;
 import org.apache.druid.indexing.common.task.AbstractTask;
 import org.apache.druid.indexing.common.task.Tasks;
-import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.exec.Controller;
 import org.apache.druid.msq.exec.ControllerContext;
 import org.apache.druid.msq.exec.MSQTasks;
@@ -53,12 +52,11 @@ import java.util.Map;
 import java.util.Set;
 
 @JsonTypeName(MSQNativeControllerTask.TYPE)
-public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQuery, HasQuerySpec
+public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQuery, IsMSQTask
 {
 
   public static final String TYPE = "native_query_controller";
   public static final String DUMMY_DATASOURCE_FOR_SELECT = "__query_select";
-  private static final Logger log = new Logger(MSQNativeControllerTask.class);
 
   private final MSQSpec querySpec;
   private final RowSignature signature;
@@ -85,6 +83,18 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
     this.signature = signature;
   }
 
+  public MSQNativeControllerTask(
+      @Nullable String id,
+      MSQSpec querySpec,
+      @Nullable Map<String, Object> context,
+      @Nullable RowSignature signature,
+      Injector injector
+  )
+  {
+    this(id, querySpec, context, signature);
+    this.injector = injector;
+  }
+
   private static String getDataSourceForTaskMetadata(final MSQSpec querySpec)
   {
     final MSQDestination destination = querySpec.getDestination();
@@ -104,13 +114,25 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
     final OverlordClient overlordClient = injector.getInstance(OverlordClient.class)
                                                   .withRetryPolicy(StandardRetryPolicy.unlimited());
     final ControllerContext context = new IndexerControllerContext(
+        this,
         toolbox,
         injector,
         clientFactory,
         overlordClient
     );
-    controller = new NativeControllerImpl(this, context);
-    return controller.run();
+    controller = new NativeControllerImpl(this.getId(), querySpec, context);
+
+    final TaskReportQueryListener queryListener = new TaskReportQueryListener(
+        querySpec.getDestination(),
+        () -> toolbox.getTaskReportFileWriter().openReportOutputStream(getId()),
+        toolbox.getJsonMapper(),
+        getId(),
+        getContext(),
+        true
+    );
+
+    controller.run(queryListener);
+    return queryListener.getStatusReport().toTaskStatus(getId());
   }
 
   @Override
@@ -151,7 +173,7 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
   public void stopGracefully(TaskConfig taskConfig)
   {
     if (controller != null) {
-      controller.stopGracefully();
+      controller.stop();
     }
   }
 

@@ -212,6 +212,12 @@ public class ClusterByStatisticsCollectorImpl implements ClusterByStatisticsColl
     return count;
   }
 
+  @VisibleForTesting
+  long getTotalRetainedBytes()
+  {
+    return totalRetainedBytes;
+  }
+
   @Override
   public boolean hasMultipleValues(final int keyPosition)
   {
@@ -237,8 +243,6 @@ public class ClusterByStatisticsCollectorImpl implements ClusterByStatisticsColl
   @Override
   public ClusterByPartitions generatePartitionsWithTargetWeight(final long targetWeight)
   {
-    logSketches();
-
     if (targetWeight < 1) {
       throw new IAE("Target weight must be positive");
     }
@@ -282,8 +286,6 @@ public class ClusterByStatisticsCollectorImpl implements ClusterByStatisticsColl
   @Override
   public ClusterByPartitions generatePartitionsWithMaxCount(final int maxNumPartitions)
   {
-    logSketches();
-
     if (maxNumPartitions < 1) {
       throw new IAE("Must have at least one partition");
     } else if (buckets.isEmpty()) {
@@ -325,7 +327,8 @@ public class ClusterByStatisticsCollectorImpl implements ClusterByStatisticsColl
     return ranges;
   }
 
-  private void logSketches()
+  @Override
+  public void logSketches()
   {
     if (log.isDebugEnabled()) {
       // Log all sketches
@@ -414,7 +417,7 @@ public class ClusterByStatisticsCollectorImpl implements ClusterByStatisticsColl
   void downSample()
   {
     long newTotalRetainedBytes = totalRetainedBytes;
-    final long targetTotalRetainedBytes = totalRetainedBytes / 2;
+    final long targetTotalRetainedBytes = Math.min(totalRetainedBytes / 2, maxRetainedBytes);
 
     final List<Pair<Long, BucketHolder>> sortedHolders = new ArrayList<>(buckets.size());
     final RowKeyReader trimmedRowReader = keyReader.trimmedKeyReader(clusterBy.getBucketByCount());

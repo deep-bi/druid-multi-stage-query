@@ -104,7 +104,7 @@ public class ExtractResultsFactory implements QueryTestRunner.QueryRunStepFactor
           }
           extractedResults.add(
               results.withSignatureAndResults(
-                  convertColumnAndTypeToRowSignature(payload.getResults().getSignature()), resultRows)
+                  MSQResultsReport.ColumnAndType.toRowSignature(payload.getResults().getSignature()), resultRows)
           );
         }
       }
@@ -113,15 +113,6 @@ public class ExtractResultsFactory implements QueryTestRunner.QueryRunStepFactor
       public List<QueryTestRunner.QueryResults> results()
       {
         return extractedResults;
-      }
-
-      private RowSignature convertColumnAndTypeToRowSignature(final List<MSQResultsReport.ColumnAndType> columnAndTypes)
-      {
-        final RowSignature.Builder builder = RowSignature.builder();
-        for (MSQResultsReport.ColumnAndType columnAndType : columnAndTypes) {
-          builder.add(columnAndType.getName(), columnAndType.getType());
-        }
-        return builder.build();
       }
     };
   }

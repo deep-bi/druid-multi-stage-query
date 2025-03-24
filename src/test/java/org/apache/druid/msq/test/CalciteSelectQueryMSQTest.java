@@ -19,21 +19,14 @@
 
 package org.apache.druid.msq.test;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.inject.Injector;
-import com.google.inject.Module;
 import org.apache.druid.common.config.NullHandling;
-import org.apache.druid.guice.DruidInjectorBuilder;
 import org.apache.druid.java.util.common.ISE;
-import org.apache.druid.msq.exec.WorkerMemoryParameters;
 import org.apache.druid.msq.sql.MSQTaskSqlEngine;
-import org.apache.druid.query.groupby.TestGroupByBuffers;
-import org.apache.druid.server.QueryLifecycleFactory;
 import org.apache.druid.sql.calcite.CalciteQueryTest;
 import org.apache.druid.sql.calcite.QueryTestBuilder;
-import org.apache.druid.sql.calcite.run.SqlEngine;
+import org.apache.druid.sql.calcite.SqlTestFrameworkConfig;
 import org.junit.Assert;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
@@ -44,42 +37,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * Runs {@link CalciteQueryTest} but with MSQ engine
  */
+@SqlTestFrameworkConfig.ComponentSupplier(StandardMSQComponentSupplier.class)
 public class CalciteSelectQueryMSQTest extends CalciteQueryTest
 {
-  @Override
-  public void configureGuice(DruidInjectorBuilder builder)
-  {
-    super.configureGuice(builder);
-    builder.addModules(CalciteMSQTestsHelper.fetchModules(this::newTempFolder, TestGroupByBuffers.createDefault()).toArray(new Module[0]));
-  }
-
-
-  @Override
-  public SqlEngine createEngine(
-      QueryLifecycleFactory qlf,
-      ObjectMapper queryJsonMapper,
-      Injector injector
-  )
-  {
-    final WorkerMemoryParameters workerMemoryParameters =
-        WorkerMemoryParameters.createInstance(
-            WorkerMemoryParameters.PROCESSING_MINIMUM_BYTES * 50,
-            2,
-            10,
-            2,
-            0,
-            0
-        );
-    final MSQSQLTestOverlordServiceClient indexingServiceClient = new MSQSQLTestOverlordServiceClient(
-        queryJsonMapper,
-        injector,
-        new MSQTestTaskActionClient(queryJsonMapper, injector),
-        workerMemoryParameters,
-        ImmutableList.of()
-    );
-    return new MSQTaskSqlEngine(indexingServiceClient, queryJsonMapper);
-  }
-
   @Override
   protected QueryTestBuilder testBuilder()
   {
@@ -133,6 +93,14 @@ public class CalciteSelectQueryMSQTest extends CalciteQueryTest
   @Override
   @Test
   public void testExactCountDistinctWithFilter()
+  {
+
+  }
+
+  @Disabled
+  @Override
+  @Test
+  public void testExactCountDistinctWithFilter2()
   {
 
   }
@@ -206,27 +174,27 @@ public class CalciteSelectQueryMSQTest extends CalciteQueryTest
         )
         .sql(
             "SELECT f2.dim3,sum(f6.m1 * (1- f6.m2)) FROM"
-                + " druid.foo as f5, "
-                + " druid.foo as f6,  "
-                + " druid.numfoo as f7, "
-                + " druid.foo2 as f2, "
-                + " druid.numfoo as f3, "
-                + " druid.foo as f4, "
-                + " druid.numfoo as f1, "
-                + " druid.foo2 as f8  "
-                + "where true"
-                + " and f1.dim1 = f2.dim2 "
-                + " and f3.dim1 = f4.dim2 "
-                + " and f5.dim1 = f6.dim2 "
-                + " and f7.dim2 = f8.dim3 "
-                + " and f2.dim1 = f4.dim2 "
-                + " and f6.dim1 = f8.dim2 "
-                + " and f1.dim1 = f7.dim2 "
-                + " and f8.dim2 = 'x' "
-                + " and f3.__time >= date '2011-11-11' "
-                + " and f3.__time < date '2013-11-11' "
-                + "group by 1 "
-                + "order by 2 desc limit 1001"
+            + " druid.foo as f5, "
+            + " druid.foo as f6,  "
+            + " druid.numfoo as f7, "
+            + " druid.foo2 as f2, "
+            + " druid.numfoo as f3, "
+            + " druid.foo as f4, "
+            + " druid.numfoo as f1, "
+            + " druid.foo2 as f8  "
+            + "where true"
+            + " and f1.dim1 = f2.dim2 "
+            + " and f3.dim1 = f4.dim2 "
+            + " and f5.dim1 = f6.dim2 "
+            + " and f7.dim2 = f8.dim3 "
+            + " and f2.dim1 = f4.dim2 "
+            + " and f6.dim1 = f8.dim2 "
+            + " and f1.dim1 = f7.dim2 "
+            + " and f8.dim2 = 'x' "
+            + " and f3.__time >= date '2011-11-11' "
+            + " and f3.__time < date '2013-11-11' "
+            + "group by 1 "
+            + "order by 2 desc limit 1001"
         )
         .run();
   }

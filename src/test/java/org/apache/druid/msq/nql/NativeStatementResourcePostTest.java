@@ -64,7 +64,6 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                   + "    \"dataSource\": \"foo\",\n"
                                                   + "    \"granularity\": \"hour\",\n"
                                                   + "    \"resultFormat\":\"compactedList\",\n"
-                                                  + "    \"legacy\":false,\n"
                                                   + "    \"intervals\": [\n"
                                                   + "      \"-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z\"\n"
                                                   + "    ],\n"
@@ -114,7 +113,6 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                                + "    \"dataSource\": \"foo\",\n"
                                                                + "    \"granularity\": \"hour\",\n"
                                                                + "    \"resultFormat\":\"compactedList\",\n"
-                                                               + "    \"legacy\":false,\n"
                                                                + "    \"intervals\": [\n"
                                                                + "      \"-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z\"\n"
                                                                + "    ],\n"
@@ -137,7 +135,6 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                                        + "    \"dataSource\": \"foo\",\n"
                                                                        + "    \"granularity\": \"hour\",\n"
                                                                        + "    \"resultFormat\":\"compactedList\",\n"
-                                                                       + "    \"legacy\":false,\n"
                                                                        + "    \"intervals\": [\n"
                                                                        + "      \"-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z\"\n"
                                                                        + "    ],\n"
@@ -214,7 +211,6 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                            + "    \"v0\",\n"
                                                            + "    \"user\"\n"
                                                            + "  ],\n"
-                                                           + "  \"legacy\": false,\n"
                                                            + "  \"context\": {\n"
                                                            + "    \"executionMode\": \"async\",\n"
                                                            + "    \"__user\": \"allowAll\",\n"
@@ -247,8 +243,8 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
       + "configure durable storage as it allows the user to fetch large result sets. "
       + "Please contact your cluster admin to configure durable storage.";
   private static final String TIMESERIES_NOT_SUPPORTED_MSG = "Unsupported query class [org.apache.druid.query.timeseries.TimeseriesQuery]";
-  private static final Map<String, ColumnType> ROW_SIGNATURE = ImmutableMap.of("count",
-                                                                               ColumnType.LONG, "dim",
+  private static final Map<String, ColumnType> ROW_SIGNATURE = ImmutableMap.of("dim",
+                                                                               ColumnType.LONG, "count",
                                                                                ColumnType.LONG
   );
   private static final String CONTENT_TYPE_JSON = "application/json";
@@ -296,7 +292,10 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
 
     NativeStatementResult expected = new NativeStatementResult(taskId, StatementState.SUCCESS,
                                                                MSQTestOverlordServiceClient.CREATED_TIME,
-                                                               ImmutableMap.of(),
+                                                               ImmutableMap.of("cnt",
+                                                                               ColumnType.LONG, "dim1",
+                                                                               ColumnType.STRING
+                                                               ),
                                                                MSQTestOverlordServiceClient.DURATION,
                                                                new ResultSetInformation(
                                                                    6L,
