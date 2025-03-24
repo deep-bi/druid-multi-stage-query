@@ -242,7 +242,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
       + "the query context [selectDestination] since it is not configured on the broker. It is recommended to "
       + "configure durable storage as it allows the user to fetch large result sets. "
       + "Please contact your cluster admin to configure durable storage.";
-  private static final String QUERY_NOT_SUPPORTED = "QueryNotSupported";
+  private static final String TIMESERIES_NOT_SUPPORTED_MSG = "Unsupported query class [org.apache.druid.query.timeseries.TimeseriesQuery]";
   private static final Map<String, ColumnType> ROW_SIGNATURE = ImmutableMap.of("dim",
                                                                                ColumnType.LONG, "count",
                                                                                ColumnType.LONG
@@ -587,7 +587,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     DruidException exception = Objects.requireNonNull(((NativeStatementResult) response.getEntity()).getErrorResponse())
                                       .getUnderlyingException();
     Assertions.assertEquals(QueryNotSupportedFault.INSTANCE.getErrorCode(), exception.getErrorCode());
-    Assertions.assertEquals(QUERY_NOT_SUPPORTED, exception.getMessage());
+    Assertions.assertEquals(TIMESERIES_NOT_SUPPORTED_MSG, exception.getMessage());
   }
 
   private Response doPost(String simpleScanQuery, MockHttpServletRequest testServletRequest)

@@ -23,6 +23,8 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonTypeName;
 import org.apache.druid.error.DruidException;
 
+import javax.annotation.Nullable;
+
 @JsonTypeName(QueryNotSupportedFault.CODE)
 public class QueryNotSupportedFault extends BaseMSQFault
 {
@@ -32,6 +34,15 @@ public class QueryNotSupportedFault extends BaseMSQFault
   QueryNotSupportedFault()
   {
     super(CODE);
+  }
+  private QueryNotSupportedFault(@Nullable String errorMessage)
+  {
+    super(CODE, errorMessage);
+  }
+
+  public static Builder builder()
+  {
+    return new Builder();
   }
 
   @Override
@@ -47,5 +58,22 @@ public class QueryNotSupportedFault extends BaseMSQFault
   public static QueryNotSupportedFault instance()
   {
     return INSTANCE;
+  }
+
+  public static class Builder
+  {
+    @Nullable
+    private String errorMessage;
+
+    public Builder withErrorMessage(@Nullable String errorMessage)
+    {
+      this.errorMessage = errorMessage;
+      return this;
+    }
+
+    public QueryNotSupportedFault build()
+    {
+      return new QueryNotSupportedFault(errorMessage);
+    }
   }
 }
