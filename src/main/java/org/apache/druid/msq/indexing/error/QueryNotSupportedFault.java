@@ -35,6 +35,7 @@ public class QueryNotSupportedFault extends BaseMSQFault
   {
     super(CODE);
   }
+
   private QueryNotSupportedFault(@Nullable String errorMessage)
   {
     super(CODE, errorMessage);
