@@ -19,50 +19,24 @@
 
 package org.apache.druid.msq.exec;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableMap;
-import com.google.inject.Injector;
-import com.google.inject.Module;
-import org.apache.commons.lang3.StringUtils;
-import org.apache.druid.guice.DruidInjectorBuilder;
-import org.apache.druid.java.util.common.FileUtils;
 import org.apache.druid.msq.exec.MSQDrillWindowQueryTest.DrillWindowQueryMSQComponentSupplier;
 import org.apache.druid.msq.sql.MSQTaskSqlEngine;
-import org.apache.druid.msq.test.CalciteMSQTestsHelper;
+import org.apache.druid.msq.test.AbstractMSQComponentSupplierDelegate;
 import org.apache.druid.msq.test.ExtractResultsFactory;
-import org.apache.druid.msq.test.MSQSQLTestOverlordServiceClient;
+import org.apache.druid.msq.test.MSQTestOverlordServiceClient;
 import org.apache.druid.msq.test.VerifyMSQSupportedNativeQueriesPredicate;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.query.QueryContexts;
-import org.apache.druid.query.groupby.TestGroupByBuffers;
-import org.apache.druid.server.QueryLifecycleFactory;
 import org.apache.druid.sql.calcite.DrillWindowQueryTest;
 import org.apache.druid.sql.calcite.QueryTestBuilder;
 import org.apache.druid.sql.calcite.SqlTestFrameworkConfig;
 import org.apache.druid.sql.calcite.TempDirProducer;
 import org.apache.druid.sql.calcite.planner.PlannerCaptureHook;
-import org.apache.druid.sql.calcite.run.SqlEngine;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import java.io.File;
-import java.io.InputStream;
-import java.lang.reflect.Method;
-import java.net.URI;
-import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
-import java.util.stream.Collectors;
 
 @SqlTestFrameworkConfig.ComponentSupplier(DrillWindowQueryMSQComponentSupplier.class)
 public class MSQDrillWindowQueryTest extends DrillWindowQueryTest
@@ -73,29 +47,11 @@ public class MSQDrillWindowQueryTest extends DrillWindowQueryTest
       MultiStageQueryContext.CTX_MAX_NUM_TASKS, 5
   ));
 
-  public static class DrillWindowQueryMSQComponentSupplier extends DrillComponentSupplier
+  public static class DrillWindowQueryMSQComponentSupplier extends AbstractMSQComponentSupplierDelegate
   {
-    public DrillWindowQueryMSQComponentSupplier(TempDirProducer tempFolderProducer)
+    public DrillWindowQueryMSQComponentSupplier(TempDirProducer tempDirProducer)
     {
-      super(tempFolderProducer);
-    }
-
-    @Override
-    public void configureGuice(DruidInjectorBuilder builder)
-    {
-      super.configureGuice(builder);
-      builder.addModules(CalciteMSQTestsHelper.fetchModules(tempDirProducer::newTempFolder, TestGroupByBuffers.createDefault()).toArray(new Module[0]));
-      builder.addModule(new TestMSQSqlModule());
-    }
-
-    @Override
-    public SqlEngine createEngine(
-        QueryLifecycleFactory qlf,
-        ObjectMapper queryJsonMapper,
-        Injector injector
-    )
-    {
-      return injector.getInstance(MSQTaskSqlEngine.class);
+      super(new DrillComponentSupplier(tempDirProducer));
     }
   }
 
@@ -103,7 +59,7 @@ public class MSQDrillWindowQueryTest extends DrillWindowQueryTest
   protected QueryTestBuilder testBuilder()
   {
     return new QueryTestBuilder(new CalciteTestConfig(true))
-        .addCustomRunner(new ExtractResultsFactory(() -> (MSQSQLTestOverlordServiceClient) ((MSQTaskSqlEngine) queryFramework().engine()).overlordClient()))
+        .addCustomRunner(new ExtractResultsFactory(() -> (MSQTestOverlordServiceClient) ((MSQTaskSqlEngine) queryFramework().engine()).overlordClient()))
         .skipVectorize(true)
         .verifyNativeQueries(new VerifyMSQSupportedNativeQueriesPredicate());
   }
@@ -283,75 +239,6 @@ public class MSQDrillWindowQueryTest extends DrillWindowQueryTest
   {
     useSingleWorker();
     windowQueryTest();
-  }
-
-  // Overrides the parent test to access the jar content properly
-  @Override
-  @Test
-  public void ensureAllDeclared() throws Exception
-  {
-    URL windowQueriesUrl = ClassLoader.getSystemResource("drill/window/queries/");
-    URI uri = windowQueriesUrl.toURI();
-    Path windowFolder;
-    if ("file".equals(uri.getScheme())) {
-      windowFolder = Paths.get(uri);
-    } else if ("jar".equals(uri.getScheme())) {
-      String[] jarParts = uri.toString().split("!");
-      Path jarPath = Paths.get(new URI(StringUtils.replace(jarParts[0], "jar:", "")));
-
-      File tempDir = FileUtils.createTempDir();
-      try (JarFile jar = new JarFile(jarPath.toFile())) {
-        String resourcePath = "drill/window/queries/";
-        for (JarEntry entry : Collections.list(jar.entries())) {
-          if (entry.getName().startsWith(resourcePath) && entry.getName().endsWith(".q")) {
-            File file = new File(tempDir, entry.getName().substring(resourcePath.length()));
-            FileUtils.mkdirp(file.getParentFile());
-            try (InputStream in = jar.getInputStream(entry)) {
-              Files.copy(in, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            }
-          }
-        }
-      }
-      windowFolder = tempDir.toPath();
-    } else {
-      throw new IllegalArgumentException("Unsupported URI scheme: " + uri);
-    }
-
-    Set<String> allCases = org.apache.commons.io.FileUtils.streamFiles(windowFolder.toFile(), true, new String[]{"q"})
-                                                          .map((file) -> windowFolder.relativize(file.toPath()).toString())
-                                                          .sorted()
-                                                          .collect(
-                                        Collectors.toCollection(LinkedHashSet::new));
-    Method[] var4 = DrillWindowQueryTest.class.getDeclaredMethods();
-
-    for (Method method : var4) {
-      DrillTest ann = method.getAnnotation(DrillTest.class);
-      if (method.getAnnotation(Test.class) != null && ann != null && !allCases.remove(ann.value() + ".q")) {
-        Assertions.fail(String.format(
-            Locale.ENGLISH,
-            "Testcase [%s] references invalid file [%s].",
-            method.getName(),
-            ann.value()
-        ));
-      }
-    }
-
-    for (String string : allCases) {
-      string = string.substring(0, string.lastIndexOf(46));
-      System.out.printf(
-          Locale.ENGLISH,
-          "@%s( \"%s\" )\n@Test\npublic void test_%s() {\n    windowQueryTest();\n}\n",
-          DrillTest.class.getSimpleName(),
-          string,
-          string.replace('/', '_')
-      );
-    }
-
-    Assertions.assertEquals(
-        0L,
-        allCases.size(),
-        "Found some non-declared testcases; please add the new testcases printed to the console!"
-    );
   }
 
   /*
