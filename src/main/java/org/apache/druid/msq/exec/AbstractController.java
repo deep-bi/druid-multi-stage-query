@@ -142,6 +142,7 @@ import org.apache.druid.msq.util.IntervalUtils;
 import org.apache.druid.msq.util.MSQFutureUtils;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.query.Query;
+import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.groupby.GroupByQuery;
 import org.apache.druid.query.operator.WindowOperatorQuery;
 import org.apache.druid.query.scan.ScanQuery;
@@ -595,14 +596,19 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
   }
 
   @SuppressWarnings("rawtypes")
-  protected QueryKit<Query<?>> makeQueryControllerToolKit()
+  protected QueryKit<Query<?>> makeQueryControllerToolKit(QueryContext queryContext)
   {
     final Map<Class<? extends Query>, QueryKit> kitMap =
         ImmutableMap.<Class<? extends Query>, QueryKit>builder()
                     .put(ScanQuery.class, new ScanQueryKit(context.jsonMapper()))
                     .put(GroupByQuery.class, new GroupByQueryKit(context.jsonMapper()))
-                    .put(WindowOperatorQuery.class, new WindowOperatorQueryKit(context.jsonMapper()))
-                    .build();
+                    .put(
+                        WindowOperatorQuery.class,
+                        new WindowOperatorQueryKit(
+                            context.jsonMapper(),
+                            MultiStageQueryContext.isWindowFunctionOperatorTransformationEnabled(queryContext)
+                        )
+                    ).build();
 
     return new MultiQueryKit(kitMap);
   }

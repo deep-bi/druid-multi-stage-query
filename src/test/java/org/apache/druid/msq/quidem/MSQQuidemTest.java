@@ -20,7 +20,6 @@
 package org.apache.druid.msq.quidem;
 
 import org.apache.druid.quidem.DruidQuidemTestBase;
-import org.apache.druid.quidem.ProjectPathUtils;
 
 import java.io.File;
 
