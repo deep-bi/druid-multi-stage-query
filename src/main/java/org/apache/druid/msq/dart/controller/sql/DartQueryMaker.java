@@ -220,7 +220,8 @@ public class DartQueryMaker implements QueryMaker
             ),
             plannerContext.getJsonMapper(),
             controllerHolder.getController().queryId(),
-            Collections.emptyMap()
+            Collections.emptyMap(),
+            false
         );
 
         if (controllerHolder.run(queryListener)) {
