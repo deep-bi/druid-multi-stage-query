@@ -88,7 +88,8 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
   @SuppressWarnings("unchecked")
   private static QueryDefinition makeQueryDefinition(
       final QueryKitSpec queryKitSpec,
-      final MSQSpec querySpec
+      final MSQSpec querySpec,
+      final ControllerContext controllerContext
   )
   {
     final MSQTuningConfig tuningConfig = querySpec.getTuningConfig();
@@ -126,7 +127,7 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
 
       try {
         // Check that the export destination is empty as a sanity check. We want to avoid modifying any other files with export.
-        Iterator<String> filesIterator = exportStorageProvider.get().listDir("");
+        Iterator<String> filesIterator = exportStorageProvider.createStorageConnector(controllerContext.taskTempDir()).listDir("");
         if (filesIterator.hasNext()) {
           throw DruidException.forPersona(DruidException.Persona.USER)
                               .ofCategory(DruidException.Category.RUNTIME_FAILURE)
@@ -319,8 +320,9 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
 
     final QueryContext queryContext = querySpec.getQuery().context();
     final QueryDefinition queryDef = makeQueryDefinition(
-        context.makeQueryKitSpec(makeQueryControllerToolKit(), queryId, querySpec, queryKernelConfig),
-        querySpec
+        context.makeQueryKitSpec(makeQueryControllerToolKit(queryContext), queryId, querySpec, queryKernelConfig),
+        querySpec,
+        context
     );
 
     if (log.isDebugEnabled()) {
@@ -388,7 +390,7 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
     if (MSQControllerTask.isExport(querySpec)) {
       // Write manifest file.
       ExportMSQDestination destination = (ExportMSQDestination) querySpec.getDestination();
-      ExportMetadataManager exportMetadataManager = new ExportMetadataManager(destination.getExportStorageProvider());
+      ExportMetadataManager exportMetadataManager = new ExportMetadataManager(destination.getExportStorageProvider(), context.taskTempDir());
 
       final StageId finalStageId = queryKernel.getStageId(queryDef.getFinalStageDefinition().getStageNumber());
       //noinspection unchecked
@@ -396,10 +398,7 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
       Object resultObjectForStage = queryKernel.getResultObjectForStage(finalStageId);
       if (!(resultObjectForStage instanceof List)) {
         // This might occur if all workers are running on an older version. We are not able to write a manifest file in this case.
-        log.warn(
-            "Unable to create export manifest file. Received result[%s] from worker instead of a list of file names.",
-            resultObjectForStage
-        );
+        log.warn("Unable to create export manifest file. Received result[%s] from worker instead of a list of file names.", resultObjectForStage);
         return;
       }
       @SuppressWarnings("unchecked")

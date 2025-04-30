@@ -82,7 +82,6 @@ import org.apache.druid.sql.calcite.planner.ColumnMappings;
 import org.apache.druid.sql.calcite.util.CalciteTests;
 import org.apache.druid.sql.http.ResultFormat;
 import org.apache.druid.sql.http.SqlResourceTest;
-import org.apache.druid.storage.local.LocalFileStorageConnector;
 import org.jboss.netty.handler.codec.http.DefaultHttpResponse;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.jboss.netty.handler.codec.http.HttpVersion;
@@ -689,7 +688,7 @@ public class SqlStatementResourceTest extends MSQTestBase
   }
 
   @BeforeEach
-  public void init() throws Exception
+  public void init()
   {
     overlordClient = Mockito.mock(OverlordClient.class);
     setupMocks(overlordClient);
@@ -697,7 +696,7 @@ public class SqlStatementResourceTest extends MSQTestBase
         sqlStatementFactory,
         objectMapper,
         overlordClient,
-        new LocalFileStorageConnector(newTempFolder("local")),
+        tempDir -> localFileStorageConnector,
         authorizerMapper
     );
   }

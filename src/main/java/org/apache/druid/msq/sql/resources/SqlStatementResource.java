@@ -71,7 +71,7 @@ import org.apache.druid.sql.SqlStatementFactory;
 import org.apache.druid.sql.http.ResultFormat;
 import org.apache.druid.sql.http.SqlQuery;
 import org.apache.druid.sql.http.SqlResource;
-import org.apache.druid.storage.StorageConnector;
+import org.apache.druid.storage.StorageConnectorProvider;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.Consumes;
@@ -112,11 +112,11 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       final @MultiStageQuery SqlStatementFactory msqSqlStatementFactory,
       final ObjectMapper jsonMapper,
       final OverlordClient overlordClient,
-      final @MultiStageQuery StorageConnector storageConnector,
+      final @MultiStageQuery StorageConnectorProvider storageConnectorProvider,
       final AuthorizerMapper authorizerMapper
   )
   {
-    super(jsonMapper, overlordClient, storageConnector);
+    super(jsonMapper, overlordClient, storageConnectorProvider.createStorageConnector(null));
     this.msqSqlStatementFactory = msqSqlStatementFactory;
     this.authorizerMapper = authorizerMapper;
   }

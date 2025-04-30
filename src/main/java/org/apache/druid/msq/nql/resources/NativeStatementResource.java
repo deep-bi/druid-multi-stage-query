@@ -73,7 +73,7 @@ import org.apache.druid.server.security.AuthorizerMapper;
 import org.apache.druid.server.security.ForbiddenException;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
 import org.apache.druid.sql.http.ResultFormat;
-import org.apache.druid.storage.StorageConnector;
+import org.apache.druid.storage.StorageConnectorProvider;
 import org.joda.time.DateTime;
 
 import javax.servlet.http.HttpServletRequest;
@@ -121,10 +121,10 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
       final OverlordClient overlordClient,
       final QueryLifecycleFactory lifecycleFactory,
       final AuthorizerMapper authorizerMapper,
-      final @MultiStageQuery StorageConnector storageConnector
+      final @MultiStageQuery StorageConnectorProvider storageConnectorProvider
   )
   {
-    super(jsonMapper, overlordClient, storageConnector);
+    super(jsonMapper, overlordClient, storageConnectorProvider.createStorageConnector(null));
     this.lifecycleFactory = lifecycleFactory;
     this.objectMapper = serializeDataTimeAsLong(jsonMapper);
     this.smileMapper = serializeDataTimeAsLong(smileMapper);

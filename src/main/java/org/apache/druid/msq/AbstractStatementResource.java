@@ -58,9 +58,9 @@ import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.QueryContexts;
 import org.apache.druid.rpc.HttpResponseException;
 import org.apache.druid.rpc.indexing.OverlordClient;
-import org.apache.druid.server.security.Access;
 import org.apache.druid.server.security.Action;
 import org.apache.druid.server.security.AuthenticationResult;
+import org.apache.druid.server.security.AuthorizationResult;
 import org.apache.druid.server.security.AuthorizationUtils;
 import org.apache.druid.server.security.AuthorizerMapper;
 import org.apache.druid.server.security.ForbiddenException;
@@ -135,7 +135,13 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
     }
     String taskId = String.valueOf(firstRow[0]);
 
-    Optional<ResultType> statementResult = getStatementStatus(taskId, authenticationResult, true, Action.READ, false);
+    Optional<ResultType> statementResult = getStatementStatus(
+        taskId,
+        authenticationResult,
+        true,
+        Action.READ,
+        false
+    );
 
     if (statementResult.isPresent()) {
       return Response.status(Response.Status.OK).entity(statementResult.get()).build();
@@ -180,21 +186,21 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
       return msqControllerTask;
     }
 
-    Access access = AuthorizationUtils.authorizeAllResourceActions(
+    AuthorizationResult authResult = AuthorizationUtils.authorizeAllResourceActions(
         authenticationResult,
         Collections.singletonList(new ResourceAction(Resource.STATE_RESOURCE, forAction)),
         authorizerMapper
     );
 
-    if (access.isAllowed()) {
-      return msqControllerTask;
+    if (!authResult.allowAccessWithNoRestriction()) {
+      throw new ForbiddenException(StringUtils.format(
+          "The current user[%s] cannot view query id[%s] since the query is owned by another user",
+          currentUser,
+          queryId
+      ));
     }
 
-    throw new ForbiddenException(StringUtils.format(
-        "The current user[%s] cannot view query id[%s] since the query is owned by another user",
-        currentUser,
-        queryId
-    ));
+    return msqControllerTask;
   }
 
   @SuppressWarnings("ReassignedVariable")

@@ -22,7 +22,6 @@ package org.apache.druid.msq.exec;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.Intervals;
 import org.apache.druid.java.util.common.granularity.Granularities;
@@ -591,6 +590,7 @@ public class MSQWindowTest extends MSQTestBase
                 .dataSource(CalciteTests.DATASOURCE1)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("m1")
+                .columnTypes(ColumnType.FLOAT)
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(contextWithRowSignature)
                 .build()),
@@ -658,6 +658,7 @@ public class MSQWindowTest extends MSQTestBase
                 .dataSource(CalciteTests.DATASOURCE1)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("m1", "m2")
+                .columnTypes(ColumnType.FLOAT, ColumnType.DOUBLE)
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(contextWithRowSignature)
                 .build()),
@@ -728,6 +729,7 @@ public class MSQWindowTest extends MSQTestBase
                 .dataSource(CalciteTests.DATASOURCE1)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("m1", "m2")
+                .columnTypes(ColumnType.FLOAT, ColumnType.DOUBLE)
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(contextWithRowSignature)
                 .build()),
@@ -870,6 +872,7 @@ public class MSQWindowTest extends MSQTestBase
                 .dataSource(CalciteTests.DATASOURCE1)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("m1", "v0")
+                .columnTypes(ColumnType.FLOAT, ColumnType.LONG)
                 .virtualColumns(expressionVirtualColumn("v0", "strlen(\"dim1\")", ColumnType.LONG))
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(contextWithRowSignature)
@@ -942,6 +945,7 @@ public class MSQWindowTest extends MSQTestBase
                 .dataSource(CalciteTests.DATASOURCE1)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("m1")
+                .columnTypes(ColumnType.FLOAT)
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(contextWithRowSignature)
                 .build()),
@@ -987,7 +991,7 @@ public class MSQWindowTest extends MSQTestBase
                     .putAll(DEFAULT_MSQ_CONTEXT)
                     .put(
                         DruidQuery.CTX_SCAN_SIGNATURE,
-                        "[{\"name\":\"j0.m2\",\"type\":\"DOUBLE\"},{\"name\":\"m1\",\"type\":\"FLOAT\"}]"
+                        "[{\"name\":\"m1\",\"type\":\"FLOAT\"},{\"name\":\"j0.m2\",\"type\":\"DOUBLE\"}]"
                     )
                     .build();
 
@@ -1024,6 +1028,7 @@ public class MSQWindowTest extends MSQTestBase
                                 .intervals(querySegmentSpec(Filtration.eternity()))
                                 .virtualColumns(expressionVirtualColumn("v0", "\"m2\"", ColumnType.FLOAT))
                                 .columns("m2", "v0")
+                                .columnTypes(ColumnType.DOUBLE, ColumnType.FLOAT)
                                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                                 .context(contextWithRowSignature1)
                                 .build()
@@ -1037,7 +1042,8 @@ public class MSQWindowTest extends MSQTestBase
                     )
                 )
                 .intervals(querySegmentSpec(Filtration.eternity()))
-                .columns("j0.m2", "m1")
+                .columns("m1", "j0.m2")
+                .columnTypes(ColumnType.FLOAT, ColumnType.DOUBLE)
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(contextWithRowSignature)
                 .build()),
@@ -1090,7 +1096,7 @@ public class MSQWindowTest extends MSQTestBase
                     .putAll(DEFAULT_MSQ_CONTEXT)
                     .put(
                         DruidQuery.CTX_SCAN_SIGNATURE,
-                        "[{\"name\":\"j0.m2\",\"type\":\"DOUBLE\"},{\"name\":\"m1\",\"type\":\"FLOAT\"}]"
+                        "[{\"name\":\"m1\",\"type\":\"FLOAT\"},{\"name\":\"j0.m2\",\"type\":\"DOUBLE\"}]"
                     )
                     .build();
 
@@ -1127,6 +1133,7 @@ public class MSQWindowTest extends MSQTestBase
                                 .intervals(querySegmentSpec(Filtration.eternity()))
                                 .virtualColumns(expressionVirtualColumn("v0", "\"m2\"", ColumnType.FLOAT))
                                 .columns("m2", "v0")
+                                .columnTypes(ColumnType.DOUBLE, ColumnType.FLOAT)
                                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                                 .context(contextWithRowSignature1)
                                 .build()
@@ -1140,7 +1147,8 @@ public class MSQWindowTest extends MSQTestBase
                     )
                 )
                 .intervals(querySegmentSpec(Filtration.eternity()))
-                .columns("j0.m2", "m1")
+                .columns("m1", "j0.m2")
+                .columnTypes(ColumnType.FLOAT, ColumnType.DOUBLE)
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(contextWithRowSignature)
                 .build()),
@@ -1213,6 +1221,7 @@ public class MSQWindowTest extends MSQTestBase
                 .dataSource(CalciteTests.DATASOURCE1)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("dim2", "m1")
+                .columnTypes(ColumnType.STRING, ColumnType.FLOAT)
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(contextWithRowSignature)
                 .build()),
@@ -1240,15 +1249,6 @@ public class MSQWindowTest extends MSQTestBase
                                    .build())
         .setExpectedRowSignature(rowSignature)
         .setExpectedResultRows(
-            NullHandling.replaceWithDefault() ?
-            ImmutableList.of(
-                new Object[]{"", 11.0},
-                new Object[]{"", 11.0},
-                new Object[]{"", 11.0},
-                new Object[]{"a", 5.0},
-                new Object[]{"a", 5.0},
-                new Object[]{"abc", 5.0}
-            ) :
             ImmutableList.of(
                 new Object[]{null, 8.0},
                 new Object[]{null, 8.0},
@@ -1269,7 +1269,7 @@ public class MSQWindowTest extends MSQTestBase
                     .putAll(DEFAULT_MSQ_CONTEXT)
                     .put(
                         DruidQuery.CTX_SCAN_SIGNATURE,
-                        "[{\"name\":\"j0.unnest\",\"type\":\"STRING\"},{\"name\":\"m1\",\"type\":\"FLOAT\"}]"
+                        "[{\"name\":\"m1\",\"type\":\"FLOAT\"},{\"name\":\"j0.unnest\",\"type\":\"STRING\"}]"
                     )
                     .build();
 
@@ -1297,7 +1297,8 @@ public class MSQWindowTest extends MSQTestBase
                     )
                 )
                 .intervals(querySegmentSpec(Filtration.eternity()))
-                .columns("j0.unnest", "m1")
+                .columns("m1", "j0.unnest")
+                .columnTypes(ColumnType.FLOAT, ColumnType.STRING)
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(contextWithRowSignature)
                 .build()),
@@ -1336,8 +1337,8 @@ public class MSQWindowTest extends MSQTestBase
             new Object[]{2.0f, 24.0, "c"},
             new Object[]{3.0f, 24.0, "d"},
             new Object[]{4.0f, 24.0, ""},
-            new Object[]{5.0f, 24.0, NullHandling.sqlCompatible() ? null : ""},
-            new Object[]{6.0f, 24.0, NullHandling.sqlCompatible() ? null : ""}
+            new Object[]{5.0f, 24.0, null},
+            new Object[]{6.0f, 24.0, null}
         ))
         .setQueryContext(DEFAULT_MSQ_CONTEXT)
         .verifyResults();
@@ -1351,7 +1352,7 @@ public class MSQWindowTest extends MSQTestBase
                     .putAll(DEFAULT_MSQ_CONTEXT)
                     .put(
                         DruidQuery.CTX_SCAN_SIGNATURE,
-                        "[{\"name\":\"j0.unnest\",\"type\":\"STRING\"},{\"name\":\"m1\",\"type\":\"FLOAT\"}]"
+                        "[{\"name\":\"m1\",\"type\":\"FLOAT\"},{\"name\":\"j0.unnest\",\"type\":\"STRING\"}]"
                     )
                     .build();
 
@@ -1379,7 +1380,8 @@ public class MSQWindowTest extends MSQTestBase
                     )
                 )
                 .intervals(querySegmentSpec(Filtration.eternity()))
-                .columns("j0.unnest", "m1")
+                .columns("m1", "j0.unnest")
+                .columnTypes(ColumnType.FLOAT, ColumnType.STRING)
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(contextWithRowSignature)
                 .build()),
@@ -1419,8 +1421,8 @@ public class MSQWindowTest extends MSQTestBase
             new Object[]{2.0f, 4.0, "c"},
             new Object[]{3.0f, 3.0, "d"},
             new Object[]{4.0f, 4.0, ""},
-            new Object[]{5.0f, 5.0, NullHandling.sqlCompatible() ? null : ""},
-            new Object[]{6.0f, 6.0, NullHandling.sqlCompatible() ? null : ""}
+            new Object[]{5.0f, 5.0, null},
+            new Object[]{6.0f, 6.0, null}
         ))
         .setQueryContext(DEFAULT_MSQ_CONTEXT)
         .verifyResults();
@@ -1549,7 +1551,7 @@ public class MSQWindowTest extends MSQTestBase
                              new Object[]{946771200000L, 2.0f, 4.0, "b"},
                              new Object[]{946771200000L, 2.0f, 4.0, "c"},
                              new Object[]{946857600000L, 3.0f, 3.0, "d"},
-                             new Object[]{978307200000L, 4.0f, 4.0, NullHandling.sqlCompatible() ? "" : null},
+                             new Object[]{978307200000L, 4.0f, 4.0, ""},
                              new Object[]{978393600000L, 5.0f, 5.0, null},
                              new Object[]{978480000000L, 6.0f, 6.0, null}
                          )
@@ -1740,7 +1742,7 @@ public class MSQWindowTest extends MSQTestBase
                     .putAll(DEFAULT_MSQ_CONTEXT)
                     .put(
                         DruidQuery.CTX_SCAN_SIGNATURE,
-                        "[{\"name\":\"added\",\"type\":\"LONG\"},{\"name\":\"cityName\",\"type\":\"STRING\"}]"
+                        "[{\"name\":\"cityName\",\"type\":\"STRING\"},{\"name\":\"added\",\"type\":\"LONG\"}]"
                     )
                     .build();
 
@@ -1750,7 +1752,8 @@ public class MSQWindowTest extends MSQTestBase
                 .dataSource(CalciteTests.WIKIPEDIA)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .filters(in("cityName", ImmutableList.of("Ahmedabad", "Albuquerque")))
-                .columns("added", "cityName")
+                .columns("cityName", "added")
+                .columnTypes(ColumnType.STRING, ColumnType.LONG)
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(contextWithRowSignature)
                 .build()),
@@ -1829,7 +1832,7 @@ public class MSQWindowTest extends MSQTestBase
                     .putAll(DEFAULT_MSQ_CONTEXT)
                     .put(
                         DruidQuery.CTX_SCAN_SIGNATURE,
-                        "[{\"name\":\"added\",\"type\":\"LONG\"},{\"name\":\"cityName\",\"type\":\"STRING\"},{\"name\":\"countryIsoCode\",\"type\":\"STRING\"}]"
+                        "[{\"name\":\"cityName\",\"type\":\"STRING\"},{\"name\":\"countryIsoCode\",\"type\":\"STRING\"},{\"name\":\"added\",\"type\":\"LONG\"}]"
                     )
                     .build();
 
@@ -1839,7 +1842,8 @@ public class MSQWindowTest extends MSQTestBase
                 .dataSource(CalciteTests.WIKIPEDIA)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .filters(notNull("cityName"))
-                .columns("added", "cityName", "countryIsoCode")
+                .columns("cityName", "countryIsoCode", "added")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                 .context(innerContextWithRowSignature)
                 .build()),
@@ -1861,13 +1865,14 @@ public class MSQWindowTest extends MSQTestBase
                     .putAll(DEFAULT_MSQ_CONTEXT)
                     .put(
                         DruidQuery.CTX_SCAN_SIGNATURE,
-                        "[{\"name\":\"added\",\"type\":\"LONG\"},{\"name\":\"cityName\",\"type\":\"STRING\"},{\"name\":\"w0\",\"type\":\"LONG\"}]"
+                        "[{\"name\":\"cityName\",\"type\":\"STRING\"},{\"name\":\"added\",\"type\":\"LONG\"},{\"name\":\"w0\",\"type\":\"LONG\"}]"
                     )
                     .build();
     final Query scanQuery = Druids.newScanQueryBuilder()
                                   .dataSource(new QueryDataSource(query))
                                   .intervals(querySegmentSpec(Filtration.eternity()))
-                                  .columns("added", "cityName", "w0")
+                                  .columns("cityName", "added", "w0")
+                                  .columnTypes(ColumnType.STRING, ColumnType.LONG, ColumnType.LONG)
                                   .limit(5)
                                   .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                                   .context(outerContextWithRowSignature)
@@ -2016,12 +2021,12 @@ public class MSQWindowTest extends MSQTestBase
     multipleWorkerContext.put(MultiStageQueryContext.CTX_MAX_NUM_TASKS, 5);
 
     final RowSignature rowSignature = RowSignature.builder()
-                                                  .add("countryName", ColumnType.STRING)
-                                                  .add("cityName", ColumnType.STRING)
-                                                  .add("channel", ColumnType.STRING)
-                                                  .add("c1", ColumnType.LONG)
-                                                  .add("c2", ColumnType.LONG)
-                                                  .build();
+                                            .add("countryName", ColumnType.STRING)
+                                            .add("cityName", ColumnType.STRING)
+                                            .add("channel", ColumnType.STRING)
+                                            .add("c1", ColumnType.LONG)
+                                            .add("c2", ColumnType.LONG)
+                                            .build();
 
     final Map<String, Object> contextWithRowSignature =
         ImmutableMap.<String, Object>builder()
@@ -2033,30 +2038,30 @@ public class MSQWindowTest extends MSQTestBase
                     .build();
 
     final GroupByQuery groupByQuery = GroupByQuery.builder()
-                                                  .setDataSource(CalciteTests.WIKIPEDIA)
-                                                  .setInterval(querySegmentSpec(Filtration
-                                                                                    .eternity()))
-                                                  .setGranularity(Granularities.ALL)
-                                                  .setDimensions(dimensions(
-                                                      new DefaultDimensionSpec(
-                                                          "countryName",
-                                                          "d0",
-                                                          ColumnType.STRING
-                                                      ),
-                                                      new DefaultDimensionSpec(
-                                                          "cityName",
-                                                          "d1",
-                                                          ColumnType.STRING
-                                                      ),
-                                                      new DefaultDimensionSpec(
-                                                          "channel",
-                                                          "d2",
-                                                          ColumnType.STRING
-                                                      )
-                                                  ))
-                                                  .setDimFilter(in("countryName", ImmutableList.of("Austria", "Republic of Korea")))
-                                                  .setContext(multipleWorkerContext)
-                                                  .build();
+                                           .setDataSource(CalciteTests.WIKIPEDIA)
+                                           .setInterval(querySegmentSpec(Filtration
+                                                                             .eternity()))
+                                           .setGranularity(Granularities.ALL)
+                                           .setDimensions(dimensions(
+                                               new DefaultDimensionSpec(
+                                                   "countryName",
+                                                   "d0",
+                                                   ColumnType.STRING
+                                               ),
+                                               new DefaultDimensionSpec(
+                                                   "cityName",
+                                                   "d1",
+                                                   ColumnType.STRING
+                                               ),
+                                               new DefaultDimensionSpec(
+                                                   "channel",
+                                                   "d2",
+                                                   ColumnType.STRING
+                                               )
+                                           ))
+                                           .setDimFilter(in("countryName", ImmutableList.of("Austria", "Republic of Korea")))
+                                           .setContext(multipleWorkerContext)
+                                           .build();
 
     final AggregatorFactory[] aggs = {
         new FilteredAggregatorFactory(new CountAggregatorFactory("w1"), notNull("d2"), "w1")
@@ -2084,31 +2089,32 @@ public class MSQWindowTest extends MSQTestBase
     );
 
     final ScanQuery scanQuery = Druids.newScanQueryBuilder()
-                                      .dataSource(new QueryDataSource(windowQuery))
-                                      .intervals(querySegmentSpec(Filtration.eternity()))
-                                      .columns("d0", "d1", "d2", "w0", "w1")
-                                      .orderBy(
-                                          ImmutableList.of(
-                                              OrderBy.ascending("d0"),
-                                              OrderBy.ascending("d1"),
-                                              OrderBy.ascending("d2")
-                                          )
+                                  .dataSource(new QueryDataSource(windowQuery))
+                                  .intervals(querySegmentSpec(Filtration.eternity()))
+                                  .columns("d0", "d1", "d2", "w0", "w1")
+                                  .columnTypes(ColumnType.STRING, ColumnType.DOUBLE, ColumnType.STRING, ColumnType.STRING, ColumnType.STRING)
+                                  .orderBy(
+                                      ImmutableList.of(
+                                          OrderBy.ascending("d0"),
+                                          OrderBy.ascending("d1"),
+                                          OrderBy.ascending("d2")
                                       )
-                                      .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.STRING, ColumnType.LONG, ColumnType.LONG)
-                                      .limit(Long.MAX_VALUE)
-                                      .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
-                                      .context(contextWithRowSignature)
-                                      .build();
+                                  )
+                                  .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.STRING, ColumnType.LONG, ColumnType.LONG)
+                                  .limit(Long.MAX_VALUE)
+                                  .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
+                                  .context(contextWithRowSignature)
+                                  .build();
 
     final String sql = "select countryName, cityName, channel, \n"
-                       + "row_number() over (order by countryName, cityName, channel) as c1, \n"
-                       + "count(channel) over (partition by cityName order by countryName, cityName, channel) as c2\n"
-                       + "from wikipedia\n"
-                       + "where countryName in ('Austria', 'Republic of Korea')\n"
-                       + "group by countryName, cityName, channel "
-                       + "order by countryName, cityName, channel";
+                          + "row_number() over (order by countryName, cityName, channel) as c1, \n"
+                          + "count(channel) over (partition by cityName order by countryName, cityName, channel) as c2\n"
+                          + "from wikipedia\n"
+                          + "where countryName in ('Austria', 'Republic of Korea')\n"
+                          + "group by countryName, cityName, channel "
+                          + "order by countryName, cityName, channel";
 
-    final String nullValue = NullHandling.sqlCompatible() ? null : "";
+    final String nullValue = null;
 
     testSelectQuery()
         .setSql(sql)
@@ -2219,64 +2225,106 @@ public class MSQWindowTest extends MSQTestBase
             2, 0, "input0"
         )
         .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(13).bytes(1379).frames(1),
+            CounterSnapshotMatcher.with().rows(13).bytes(989).frames(1),
             2, 0, "output"
         )
 
-        // Stage 3, Worker 0
+        // Stage 3, Worker 1 (window stage)
         .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(3).bytes(318).frames(1),
-            3, 0, "input0"
-        )
-        .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(3).bytes(330).frames(1),
-            3, 0, "output"
-        )
-        .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(3).bytes(318).frames(1),
-            3, 0, "shuffle"
-        )
-
-        // Stage 3, Worker 1
-        .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(0, 3).bytes(0, 333).frames(0, 1),
+            CounterSnapshotMatcher.with().rows(0, 6).bytes(0, 461).frames(0, 1),
             3, 1, "input0"
         )
         .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(3).bytes(345).frames(1),
+            CounterSnapshotMatcher.with().rows(0, 6).bytes(0, 641).frames(0, 1),
             3, 1, "output"
         )
         .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(3).bytes(333).frames(1),
+            CounterSnapshotMatcher.with().rows(1, 1, 2, 2).bytes(122, 132, 230, 235).frames(1, 1, 1, 1),
             3, 1, "shuffle"
         )
 
-        // Stage 3, Worker 2
+        // Stage 3, Worker 2 (window stage)
         .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(0, 0, 3).bytes(0, 0, 352).frames(0, 0, 1),
+            CounterSnapshotMatcher.with().rows(0, 0, 1).bytes(0, 0, 114).frames(0, 0, 1),
             3, 2, "input0"
         )
         .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(3).bytes(364).frames(1),
+            CounterSnapshotMatcher.with().rows(0, 0, 1).bytes(0, 0, 144).frames(0, 0, 1),
             3, 2, "output"
         )
         .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(3).bytes(352).frames(1),
+            CounterSnapshotMatcher.with().rows(1).bytes(140).frames(1),
             3, 2, "shuffle"
         )
 
-        // Stage 3, Worker 3
+        // Stage 3, Worker 3 (window stage)
         .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(0, 0, 0, 4).bytes(0, 0, 0, 426).frames(0, 0, 0, 1),
+            CounterSnapshotMatcher.with().rows(0, 0, 0, 6).bytes(0, 0, 0, 482).frames(0, 0, 0, 1),
             3, 3, "input0"
         )
         .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(4).bytes(442).frames(1),
+            CounterSnapshotMatcher.with().rows(0, 0, 0, 6).bytes(0, 0, 0, 662).frames(0, 0, 0, 1),
             3, 3, "output"
         )
         .setExpectedCountersForStageWorkerChannel(
-            CounterSnapshotMatcher.with().rows(4).bytes(426).frames(1),
+            CounterSnapshotMatcher.with().rows(1, 1, 2, 2).bytes(143, 137, 222, 238).frames(1, 1, 1, 1),
             3, 3, "shuffle"
+        )
+
+        // Stage 4, Worker 0
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(3).bytes(337).frames(1),
+            4, 0, "input0"
+        )
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(3).bytes(349).frames(1),
+            4, 0, "output"
+        )
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(3).bytes(337).frames(1),
+            4, 0, "shuffle"
+        )
+
+        // Stage 4, Worker 1
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(0, 2).bytes(0, 235).frames(0, 1),
+            4, 1, "input0"
+        )
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(2).bytes(243).frames(1),
+            4, 1, "output"
+        )
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(2).bytes(235).frames(1),
+            4, 1, "shuffle"
+        )
+
+        // Stage 4, Worker 2
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(0, 0, 4).bytes(0, 0, 418).frames(0, 0, 1),
+            4, 2, "input0"
+        )
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(4).bytes(434).frames(1),
+            4, 2, "output"
+        )
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(4).bytes(418).frames(1),
+            4, 2, "shuffle"
+        )
+
+        // Stage 4, Worker 3
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(0, 0, 0, 4).bytes(0, 0, 0, 439).frames(0, 0, 0, 1),
+            4, 3, "input0"
+        )
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(4).bytes(455).frames(1),
+            4, 3, "output"
+        )
+        .setExpectedCountersForStageWorkerChannel(
+            CounterSnapshotMatcher.with().rows(4).bytes(439).frames(1),
+            4, 3, "shuffle"
         )
         .verifyResults();
   }
@@ -2331,7 +2379,7 @@ public class MSQWindowTest extends MSQTestBase
         .setExpectedExecutionErrorMatcher(CoreMatchers.allOf(
             CoreMatchers.instanceOf(ISE.class),
             ThrowableMessageMatcher.hasMessage(CoreMatchers.containsString(
-                "Encountered a multi value column [v0]. Window processing does not support MVDs. Consider using UNNEST or MV_TO_ARRAY."))
+                "Encountered a multi value column. Window processing does not support MVDs. Consider using UNNEST or MV_TO_ARRAY."))
         ))
         .verifyExecutionError();
   }
@@ -2350,7 +2398,7 @@ public class MSQWindowTest extends MSQTestBase
         .setExpectedExecutionErrorMatcher(CoreMatchers.allOf(
             CoreMatchers.instanceOf(ISE.class),
             ThrowableMessageMatcher.hasMessage(CoreMatchers.containsString(
-                "Encountered a multi value column [v0]. Window processing does not support MVDs. Consider using UNNEST or MV_TO_ARRAY."))
+                "Encountered a multi value column. Window processing does not support MVDs. Consider using UNNEST or MV_TO_ARRAY."))
         ))
         .verifyExecutionError();
   }

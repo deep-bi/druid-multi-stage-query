@@ -66,7 +66,6 @@ import org.apache.druid.server.security.ResourceType;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
 import org.apache.druid.sql.http.ResultFormat;
 import org.apache.druid.sql.http.SqlResourceTest;
-import org.apache.druid.storage.local.LocalFileStorageConnector;
 import org.jboss.netty.handler.codec.http.DefaultHttpResponse;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.jboss.netty.handler.codec.http.HttpVersion;
@@ -300,7 +299,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         overlordClient,
         createLifecycleFactory(),
         authorizerMapper,
-        new LocalFileStorageConnector(newTempFolder("local"))
+        s -> localFileStorageConnector
     );
   }
 

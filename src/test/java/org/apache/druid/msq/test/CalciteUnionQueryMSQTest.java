@@ -20,7 +20,6 @@
 package org.apache.druid.msq.test;
 
 import com.google.common.collect.ImmutableList;
-import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.msq.sql.MSQTaskSqlEngine;
 import org.apache.druid.query.QueryDataSource;
@@ -30,7 +29,6 @@ import org.apache.druid.query.aggregation.CountAggregatorFactory;
 import org.apache.druid.query.aggregation.LongSumAggregatorFactory;
 import org.apache.druid.query.dimension.DefaultDimensionSpec;
 import org.apache.druid.query.groupby.GroupByQuery;
-import org.apache.druid.sql.calcite.BaseCalciteQueryTest;
 import org.apache.druid.sql.calcite.CalciteUnionQueryTest;
 import org.apache.druid.sql.calcite.QueryTestBuilder;
 import org.apache.druid.sql.calcite.SqlTestFrameworkConfig;
@@ -48,7 +46,7 @@ public class CalciteUnionQueryMSQTest extends CalciteUnionQueryTest
   @Override
   protected QueryTestBuilder testBuilder()
   {
-    return new QueryTestBuilder(new BaseCalciteQueryTest.CalciteTestConfig(true))
+    return new QueryTestBuilder(new CalciteTestConfig(true))
         .addCustomRunner(new ExtractResultsFactory(() -> (MSQSQLTestOverlordServiceClient) ((MSQTaskSqlEngine) queryFramework().engine()).overlordClient()))
         .skipVectorize(true)
         .verifyNativeQueries(new VerifyMSQSupportedNativeQueriesPredicate());
@@ -62,13 +60,12 @@ public class CalciteUnionQueryMSQTest extends CalciteUnionQueryTest
    */
   @Test
   @Override
-  public void testUnionIsUnplannable()
+  public void testUnionDifferentColumnOrder()
   {
     assertQueryIsUnplannable(
         "SELECT dim2, dim1, m1 FROM foo2 UNION SELECT dim1, dim2, m1 FROM foo",
         "SQL requires union between two tables and column names queried for each table are different Left: [dim2, dim1, m1], Right: [dim1, dim2, m1]."
     );
-
   }
 
   @Disabled("Ignored till MSQ can plan UNION ALL with any operand")
@@ -114,10 +111,6 @@ public class CalciteUnionQueryMSQTest extends CalciteUnionQueryTest
                         .setContext(QUERY_CONTEXT_DEFAULT)
                         .build()
         ),
-        NullHandling.replaceWithDefault() ?
-        ImmutableList.of(
-            new Object[]{12L, 3L}
-        ) :
         ImmutableList.of(
             new Object[]{12L, 4L}
         )

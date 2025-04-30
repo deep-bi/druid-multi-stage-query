@@ -22,23 +22,16 @@ package org.apache.druid.msq.nql;
 import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableMap;
 import org.apache.druid.java.util.common.guava.Sequences;
+import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.msq.test.MSQTestBase;
 import org.apache.druid.query.DefaultGenericQueryMetricsFactory;
 import org.apache.druid.query.DefaultQueryConfig;
-import org.apache.druid.query.MapQueryToolChestWarehouse;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryRunner;
 import org.apache.druid.query.QuerySegmentWalker;
-import org.apache.druid.query.QueryToolChest;
-import org.apache.druid.query.QueryToolChestWarehouse;
 import org.apache.druid.query.SegmentDescriptor;
-import org.apache.druid.query.groupby.GroupByQuery;
-import org.apache.druid.query.groupby.GroupByQueryQueryToolChest;
-import org.apache.druid.query.scan.ScanQuery;
-import org.apache.druid.query.scan.ScanQueryQueryToolChest;
-import org.apache.druid.query.timeseries.TimeseriesQuery;
-import org.apache.druid.query.timeseries.TimeseriesQueryQueryToolChest;
 import org.apache.druid.server.QueryLifecycleFactory;
+import org.apache.druid.server.QueryStackTests;
 import org.apache.druid.server.log.TestRequestLogger;
 import org.apache.druid.server.metrics.NoopServiceEmitter;
 import org.apache.druid.server.security.AuthConfig;
@@ -48,27 +41,6 @@ import org.joda.time.Interval;
 public class NativeMSQTestBase extends MSQTestBase
 {
 
-  protected static final QueryToolChestWarehouse WAREHOUSE = new MapQueryToolChestWarehouse(ImmutableMap.<Class<? extends Query>, QueryToolChest>builder()
-                                                                                                        .put(
-                                                                                                            ScanQuery.class,
-                                                                                                            new ScanQueryQueryToolChest(
-                                                                                                                DefaultGenericQueryMetricsFactory.instance()
-                                                                                                            )
-                                                                                                        )
-                                                                                                        .put(
-                                                                                                            GroupByQuery.class,
-                                                                                                            new GroupByQueryQueryToolChest(
-                                                                                                                null,
-                                                                                                                null
-                                                                                                            )
-                                                                                                        )
-                                                                                                        // Added timeseries toolchest to test unsupported query exception
-                                                                                                        .put(
-                                                                                                            TimeseriesQuery.class,
-                                                                                                            new TimeseriesQueryQueryToolChest(
-                                                                                                            )
-                                                                                                        )
-                                                                                                        .build());
   protected static final QuerySegmentWalker TEST_SEGMENT_WALKER = new QuerySegmentWalker()
   {
     @Override
@@ -87,7 +59,7 @@ public class NativeMSQTestBase extends MSQTestBase
   protected QueryLifecycleFactory createLifecycleFactory()
   {
     return new QueryLifecycleFactory(
-        WAREHOUSE,
+        QueryStackTests.createQueryRunnerFactoryConglomerate(Closer.create()),
         TEST_SEGMENT_WALKER,
         new DefaultGenericQueryMetricsFactory(),
         new NoopServiceEmitter(),
