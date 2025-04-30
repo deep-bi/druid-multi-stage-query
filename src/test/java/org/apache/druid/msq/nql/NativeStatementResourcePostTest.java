@@ -262,7 +262,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
         indexingNativeServiceClient,
         createLifecycleFactory(),
         authorizerMapper,
-        localFileStorageConnector
+        s -> localFileStorageConnector
     );
   }
 
@@ -358,7 +358,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
         indexingNativeServiceClient,
         createLifecycleFactory(),
         authorizerMapper,
-        NilStorageConnector.getInstance()
+        s -> NilStorageConnector.getInstance()
     );
 
     MockHttpServletRequest testServletRequest = new MockHttpServletRequest();
