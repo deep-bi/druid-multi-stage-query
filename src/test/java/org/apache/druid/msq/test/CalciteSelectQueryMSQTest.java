@@ -21,7 +21,6 @@ package org.apache.druid.msq.test;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.msq.sql.MSQTaskSqlEngine;
 import org.apache.druid.sql.calcite.CalciteQueryTest;
@@ -116,22 +115,6 @@ public class CalciteSelectQueryMSQTest extends CalciteQueryTest
   @Disabled
   @Override
   @Test
-  public void testUnplannableJoinQueriesInNonSQLCompatibleMode()
-  {
-
-  }
-
-  @Disabled
-  @Override
-  @Test
-  public void testQueryWithMoreThanMaxNumericInFilter()
-  {
-
-  }
-
-  @Disabled
-  @Override
-  @Test
   public void testUnSupportedNullsFirst()
   {
   }
@@ -174,27 +157,27 @@ public class CalciteSelectQueryMSQTest extends CalciteQueryTest
         )
         .sql(
             "SELECT f2.dim3,sum(f6.m1 * (1- f6.m2)) FROM"
-            + " druid.foo as f5, "
-            + " druid.foo as f6,  "
-            + " druid.numfoo as f7, "
-            + " druid.foo2 as f2, "
-            + " druid.numfoo as f3, "
-            + " druid.foo as f4, "
-            + " druid.numfoo as f1, "
-            + " druid.foo2 as f8  "
-            + "where true"
-            + " and f1.dim1 = f2.dim2 "
-            + " and f3.dim1 = f4.dim2 "
-            + " and f5.dim1 = f6.dim2 "
-            + " and f7.dim2 = f8.dim3 "
-            + " and f2.dim1 = f4.dim2 "
-            + " and f6.dim1 = f8.dim2 "
-            + " and f1.dim1 = f7.dim2 "
-            + " and f8.dim2 = 'x' "
-            + " and f3.__time >= date '2011-11-11' "
-            + " and f3.__time < date '2013-11-11' "
-            + "group by 1 "
-            + "order by 2 desc limit 1001"
+                + " druid.foo as f5, "
+                + " druid.foo as f6,  "
+                + " druid.numfoo as f7, "
+                + " druid.foo2 as f2, "
+                + " druid.numfoo as f3, "
+                + " druid.foo as f4, "
+                + " druid.numfoo as f1, "
+                + " druid.foo2 as f8  "
+                + "where true"
+                + " and f1.dim1 = f2.dim2 "
+                + " and f3.dim1 = f4.dim2 "
+                + " and f5.dim1 = f6.dim2 "
+                + " and f7.dim2 = f8.dim3 "
+                + " and f2.dim1 = f4.dim2 "
+                + " and f6.dim1 = f8.dim2 "
+                + " and f1.dim1 = f7.dim2 "
+                + " and f8.dim2 = 'x' "
+                + " and f3.__time >= date '2011-11-11' "
+                + " and f3.__time < date '2013-11-11' "
+                + "group by 1 "
+                + "order by 2 desc limit 1001"
         )
         .run();
   }
@@ -209,7 +192,7 @@ public class CalciteSelectQueryMSQTest extends CalciteQueryTest
     testBuilder().queryContext(QUERY_CONTEXT_DEFAULT)
                  .sql("select count(*) from druid.foo where parse_long(dim1, 10) is null")
                  .expectedResults(
-                     NullHandling.sqlCompatible() ? ImmutableList.of(new Object[]{4L}) : ImmutableList.of()
+                     ImmutableList.of(new Object[]{4L})
                  )
                  .run();
   }

@@ -357,7 +357,7 @@ public class MSQExportTest extends MSQTestBase
         ImmutableList.of(
             "cnt,dim1",
             "1,2"
-        ),
+            ),
         readResultsFromFile(new File(exportDir, "query-test-query-worker0-partition2.csv"))
     );
   }

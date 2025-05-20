@@ -330,10 +330,10 @@ public class MSQFaultsTest extends MSQTestBase
     final int numRowsInInputFile = 50;
 
     final Map<String, Object> context = ImmutableMap.<String, Object>builder()
-                                                    .putAll(DEFAULT_MSQ_CONTEXT)
-                                                    .put("maxNumSegments", maxNumSegments)
-                                                    .put("rowsPerSegment", rowsPerSegment)
-                                                    .build();
+                                              .putAll(DEFAULT_MSQ_CONTEXT)
+                                              .put("maxNumSegments", maxNumSegments)
+                                              .put("rowsPerSegment", rowsPerSegment)
+                                              .build();
 
 
     final File file = createNdJsonFile(newTempFile("ndjson30k"), numRowsInInputFile, 1);
@@ -511,7 +511,7 @@ public class MSQFaultsTest extends MSQTestBase
             + "PARTITIONED BY ALL TIME")
         .setExpectedValidationErrorMatcher(
             new DruidExceptionMatcher(
-                DruidException.Persona.ADMIN,
+                DruidException.Persona.USER,
                 DruidException.Category.INVALID_INPUT,
                 "general"
             ).expectMessageContains(
@@ -533,7 +533,7 @@ public class MSQFaultsTest extends MSQTestBase
         )
         .setExpectedValidationErrorMatcher(
             new DruidExceptionMatcher(
-                DruidException.Persona.ADMIN,
+                DruidException.Persona.USER,
                 DruidException.Category.INVALID_INPUT,
                 "general"
             ).expectMessageContains(

@@ -1,53 +1,16 @@
-Subject: [PATCH] WEB_CONSOLE_MSQ_PATCH
+Subject: [PATCH] WEBCONSOLE_32.0.1_PATCH
 ---
-Index: web-console/src/utils/download-query-detail-archive.ts
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/web-console/src/utils/download-query-detail-archive.ts b/web-console/src/utils/download-query-detail-archive.ts
---- a/web-console/src/utils/download-query-detail-archive.ts	(revision b274723928315db73517c91a35c040f8ce559576)
-+++ b/web-console/src/utils/download-query-detail-archive.ts	(date 1742212083646)
-@@ -19,6 +19,7 @@
- import * as JSONBig from 'json-bigint-native';
-
- import type {
-+  AsyncNativeStatusResponse,
-   AsyncStatusResponse,
-   MsqTaskPayloadResponse,
-   MsqTaskReportResponse,
-@@ -34,6 +35,7 @@
-   reports?: MsqTaskReportResponse;
-   payload?: MsqTaskPayloadResponse;
-   statementsStatus?: AsyncStatusResponse;
-+  nativeStatementsStatus?: AsyncNativeStatusResponse;
-   serverStatus?: any;
- }
-
-@@ -61,6 +63,12 @@
-       await Api.instance.get(`/druid/v2/sql/statements/${encodedId}`)
-     ).data;
-   } catch {}
-+
-+  try {
-+    profile.nativeStatementsStatus = (
-+      await Api.instance.get(`/druid/v2/native/statements/${encodedId}`)
-+    ).data;
-+  } catch {}
-
-   try {
-     profile.serverStatus = (await Api.instance.get(`/status`)).data;
 Index: web-console/src/helpers/execution/sql-task-execution.ts
 IDEA additional info:
 Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
 <+>UTF-8
 ===================================================================
 diff --git a/web-console/src/helpers/execution/sql-task-execution.ts b/web-console/src/helpers/execution/sql-task-execution.ts
---- a/web-console/src/helpers/execution/sql-task-execution.ts	(revision b274723928315db73517c91a35c040f8ce559576)
-+++ b/web-console/src/helpers/execution/sql-task-execution.ts	(date 1742212083634)
+--- a/web-console/src/helpers/execution/sql-task-execution.ts	(revision d40b81fe31ff518bdc403c7f868455266a455bc7)
++++ b/web-console/src/helpers/execution/sql-task-execution.ts	(date 1745939610192)
 @@ -19,7 +19,12 @@
- import { QueryResult } from '@druid-toolkit/query';
  import type { AxiosResponse, CancelToken } from 'axios';
+ import { QueryResult } from 'druid-query-toolkit';
 
 -import type { AsyncStatusResponse, MsqTaskPayloadResponse, QueryContext } from '../../druid-models';
 +import type {
@@ -149,14 +112,51 @@ diff --git a/web-console/src/helpers/execution/sql-task-execution.ts b/web-conso
 
        execution = execution.updateWithAsyncStatus(statusResp.data);
      } catch (e) {
+Index: web-console/src/utils/download-query-detail-archive.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/web-console/src/utils/download-query-detail-archive.ts b/web-console/src/utils/download-query-detail-archive.ts
+--- a/web-console/src/utils/download-query-detail-archive.ts	(revision d40b81fe31ff518bdc403c7f868455266a455bc7)
++++ b/web-console/src/utils/download-query-detail-archive.ts	(date 1745940056366)
+@@ -19,6 +19,7 @@
+ import * as JSONBig from 'json-bigint-native';
+
+ import type {
++  AsyncNativeStatusResponse,
+   AsyncStatusResponse,
+   MsqTaskPayloadResponse,
+   MsqTaskReportResponse,
+@@ -34,6 +35,7 @@
+   reports?: MsqTaskReportResponse;
+   payload?: MsqTaskPayloadResponse;
+   statementsStatus?: AsyncStatusResponse;
++  nativeStatementsStatus?: AsyncNativeStatusResponse;
+   serverStatus?: any;
+ }
+
+@@ -61,6 +63,12 @@
+       await Api.instance.get(`/druid/v2/sql/statements/${encodedId}`)
+     ).data;
+   } catch {}
++
++  try {
++    profile.nativeStatementsStatus = (
++      await Api.instance.get(`/druid/v2/native/statements/${encodedId}`)
++    ).data;
++  } catch {}
+
+   try {
+     profile.serverStatus = (await Api.instance.get(`/status`)).data;
 Index: web-console/src/druid-models/execution/execution.ts
 IDEA additional info:
 Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
 <+>UTF-8
 ===================================================================
 diff --git a/web-console/src/druid-models/execution/execution.ts b/web-console/src/druid-models/execution/execution.ts
---- a/web-console/src/druid-models/execution/execution.ts	(revision b274723928315db73517c91a35c040f8ce559576)
-+++ b/web-console/src/druid-models/execution/execution.ts	(date 1742225520024)
+--- a/web-console/src/druid-models/execution/execution.ts	(revision d40b81fe31ff518bdc403c7f868455266a455bc7)
++++ b/web-console/src/druid-models/execution/execution.ts	(date 1745939901691)
 @@ -28,7 +28,7 @@
    oneOf,
    pluralIfNeeded,
@@ -194,7 +194,7 @@ diff --git a/web-console/src/druid-models/execution/execution.ts b/web-console/s
            s => new Column({ name: s.name, sqlType: s.type, nativeType: s.nativeType }),
          ),
          rows: result.sampleRecords,
-@@ -518,7 +527,7 @@
+@@ -523,7 +532,7 @@
      return ret;
    }
 
@@ -203,14 +203,31 @@ diff --git a/web-console/src/druid-models/execution/execution.ts b/web-console/s
      const value = this.valueOf();
 
      const { pages, numTotalRows } = statusPayload.result || {};
+Index: web-console/src/views/tasks-view/tasks-view.tsx
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/web-console/src/views/tasks-view/tasks-view.tsx b/web-console/src/views/tasks-view/tasks-view.tsx
+--- a/web-console/src/views/tasks-view/tasks-view.tsx	(revision d40b81fe31ff518bdc403c7f868455266a455bc7)
++++ b/web-console/src/views/tasks-view/tasks-view.tsx	(date 1745940267418)
+@@ -332,7 +332,7 @@
+   }
+
+   private onTaskDetail(task: TaskQueryResultRow) {
+-    if (task.type === 'query_controller') {
++    if (task.type === 'query_controller' || task.type === 'native_query_controller') {
+       this.setState({
+         executionDialogOpen: task.task_id,
+       });
 Index: web-console/src/druid-models/async-query/async-query.ts
 IDEA additional info:
 Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
 <+>UTF-8
 ===================================================================
 diff --git a/web-console/src/druid-models/async-query/async-query.ts b/web-console/src/druid-models/async-query/async-query.ts
---- a/web-console/src/druid-models/async-query/async-query.ts	(revision b274723928315db73517c91a35c040f8ce559576)
-+++ b/web-console/src/druid-models/async-query/async-query.ts	(date 1742218300909)
+--- a/web-console/src/druid-models/async-query/async-query.ts	(revision d40b81fe31ff518bdc403c7f868455266a455bc7)
++++ b/web-console/src/druid-models/async-query/async-query.ts	(date 1745940043738)
 @@ -22,12 +22,12 @@
 
  export type AsyncState = 'ACCEPTED' | 'RUNNING' | 'SUCCESS' | 'FAILED';
@@ -238,20 +255,3 @@ diff --git a/web-console/src/druid-models/async-query/async-query.ts b/web-conso
 +export interface AsyncNativeStatusResponse extends BaseAsyncStatusResponse {
 +  schema?: Record<string, string>
 +}
-Index: web-console/src/views/tasks-view/tasks-view.tsx
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/web-console/src/views/tasks-view/tasks-view.tsx b/web-console/src/views/tasks-view/tasks-view.tsx
---- a/web-console/src/views/tasks-view/tasks-view.tsx	(revision b274723928315db73517c91a35c040f8ce559576)
-+++ b/web-console/src/views/tasks-view/tasks-view.tsx	(date 1741947174490)
-@@ -332,7 +332,7 @@
-   }
-
-   private onTaskDetail(task: TaskQueryResultRow) {
--    if (task.type === 'query_controller') {
-+    if (task.type === 'query_controller' || task.type === 'native_query_controller') {
-       this.setState({
-         executionDialogOpen: task.task_id,
-       });
