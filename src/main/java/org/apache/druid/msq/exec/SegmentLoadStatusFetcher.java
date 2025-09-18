@@ -321,7 +321,7 @@ public class SegmentLoadStatusFetcher implements AutoCloseable
 
     @JsonCreator
     public SegmentLoadWaiterStatus(
-        @JsonProperty("state") State state,
+        @JsonProperty("state") SegmentLoadStatusFetcher.State state,
         @JsonProperty("startTime") @Nullable DateTime startTime,
         @JsonProperty("duration") long duration,
         @JsonProperty("totalSegments") int totalSegments,
@@ -344,7 +344,7 @@ public class SegmentLoadStatusFetcher implements AutoCloseable
     }
 
     @JsonProperty
-    public State getState()
+    public SegmentLoadStatusFetcher.State getState()
     {
       return state;
     }
