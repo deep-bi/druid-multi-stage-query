@@ -73,7 +73,7 @@ public class TaskReportQueryListener implements QueryListener
   private long numResults;
   private MSQStatusReport statusReport;
   private boolean resultsCurrentlyOpen;
-  private boolean isNative;
+  private final boolean isNative; // Needed for the proper web console report for native queries
 
   public TaskReportQueryListener(
       final MSQDestination destination,
