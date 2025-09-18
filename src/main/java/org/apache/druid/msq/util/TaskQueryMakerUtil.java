@@ -19,15 +19,25 @@
 
 package org.apache.druid.msq.util;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.druid.error.DruidException;
 import org.apache.druid.error.InvalidInput;
 import org.apache.druid.java.util.common.Intervals;
 import org.apache.druid.java.util.common.StringUtils;
+import org.apache.druid.java.util.common.granularity.Granularities;
+import org.apache.druid.java.util.common.granularity.Granularity;
 import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
+import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQSelectDestination;
 import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
 import org.apache.druid.query.QueryContext;
+import org.apache.druid.sql.calcite.parser.DruidSqlIngest;
+import org.apache.druid.sql.calcite.parser.DruidSqlInsert;
 import org.apache.druid.sql.calcite.parser.DruidSqlReplace;
+import org.apache.druid.sql.destination.ExportDestination;
+import org.apache.druid.sql.http.ResultFormat;
 import org.joda.time.Interval;
 
 import java.util.ArrayList;
@@ -38,29 +48,6 @@ import java.util.stream.Collectors;
 
 public class TaskQueryMakerUtil
 {
-
-  public static List<Interval> replaceTimeChunks(final QueryContext queryContext)
-  {
-    return Optional.ofNullable(queryContext.get(DruidSqlReplace.SQL_REPLACE_TIME_CHUNKS))
-                   .map(
-                       s -> {
-                         if (s instanceof String && "all".equals(StringUtils.toLowerCase((String) s))) {
-                           return Intervals.ONLY_ETERNITY;
-                         } else {
-                           final String[] parts = ((String) s).split("\\s*,\\s*");
-                           final List<Interval> intervals = new ArrayList<>();
-
-                           for (final String part : parts) {
-                             intervals.add(Intervals.of(part));
-                           }
-
-                           return intervals;
-                         }
-                       }
-                   )
-                   .orElse(null);
-  }
-
   public static MSQDestination selectDestination(final QueryContext queryContext)
   {
     final MSQSelectDestination msqSelectDestination = MultiStageQueryContext.getSelectDestination(queryContext);
@@ -78,5 +65,16 @@ public class TaskQueryMakerUtil
                 .collect(Collectors.joining(","))
       );
     }
+  }
+
+
+  public static MSQDestination buildExportDestination(ExportDestination targetDataSource, QueryContext sqlQueryContext)
+  {
+    ResultFormat format = ResultFormat.fromString(sqlQueryContext.getString(DruidSqlIngest.SQL_EXPORT_FILE_FORMAT));
+
+    return new ExportMSQDestination(
+        targetDataSource.getStorageConnectorProvider(),
+        format
+    );
   }
 }

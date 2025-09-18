@@ -3,16 +3,16 @@
 ## [IMPORTANT] Remember to update pom.xml and README.md manually
 
 ## Manual port required (owned & changed)
-- src/main/java/org/apache/druid/msq/exec/ControllerImpl.java
-- src/main/java/org/apache/druid/msq/indexing/IndexerControllerContext.java
-- src/main/java/org/apache/druid/msq/indexing/MSQControllerTask.java
-- src/main/java/org/apache/druid/msq/sql/resources/SqlStatementResource.java
-- src/test/java/org/apache/druid/msq/quidem/MSQQuidemTest.java
-- src/test/java/org/apache/druid/msq/sql/resources/SqlMSQStatementResourcePostTest.java
-- src/test/java/org/apache/druid/msq/sql/resources/SqlStatementResourceTest.java
-- src/test/java/org/apache/druid/msq/test/CalciteSelectQueryMSQTest.java
-- src/test/java/org/apache/druid/msq/test/MSQTestBase.java
-- src/test/java/org/apache/druid/msq/test/MSQTestOverlordServiceClient.java
+- src/main/java/org/apache/druid/msq/exec/ControllerImpl.java +
+- src/main/java/org/apache/druid/msq/indexing/IndexerControllerContext.java + 
+- src/main/java/org/apache/druid/msq/indexing/MSQControllerTask.java +
+- src/main/java/org/apache/druid/msq/sql/resources/SqlStatementResource.java +
+- src/test/java/org/apache/druid/msq/quidem/MSQQuidemTest.java + 
+- src/test/java/org/apache/druid/msq/sql/resources/SqlMSQStatementResourcePostTest.java +
+- src/test/java/org/apache/druid/msq/sql/resources/SqlStatementResourceTest.java +
+- src/test/java/org/apache/druid/msq/test/CalciteSelectQueryMSQTest.java + 
+- src/test/java/org/apache/druid/msq/test/MSQTestBase.java + 
+- src/test/java/org/apache/druid/msq/test/MSQTestOverlordServiceClient.java + 
 
 ### Method-level diffs
 ### src/main/java/org/apache/druid/msq/exec/ControllerImpl.java

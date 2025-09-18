@@ -121,7 +121,7 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
       throw new MSQException(e, QueryNotSupportedFault.builder().withErrorMessage(e.getMessage()).build());
     }
 
-    if (MSQControllerTask.isExport(querySpec)) {
+    if (MSQControllerTask.isExport(querySpec.getDestination())) {
       final ExportMSQDestination exportMSQDestination = (ExportMSQDestination) querySpec.getDestination();
       final ExportStorageProvider exportStorageProvider = exportMSQDestination.getExportStorageProvider();
 
@@ -162,9 +162,9 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
                                  ))
       );
       return builder.build();
-    } else if (MSQControllerTask.writeFinalStageResultsToDurableStorage(querySpec)) {
+    } else if (MSQControllerTask.writeFinalStageResultsToDurableStorage(querySpec.getDestination())) {
       return ControllerUtil.queryDefinitionForDurableStorage(queryDef, tuningConfig, queryKitSpec);
-    } else if (MSQControllerTask.writeFinalResultsToTaskReport(querySpec)) {
+    } else if (MSQControllerTask.writeFinalResultsToTaskReport(querySpec.getDestination())) {
       return queryDef;
     } else {
       throw new ISE("Unsupported destination [%s]", querySpec.getDestination());
@@ -189,6 +189,15 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
       context.registerController(this, closer);
 
       queryDef = initializeQueryDefAndState(closer);
+
+      this.netClient = closer.register(new ExceptionWrappingWorkerClient(context.newWorkerClient()));
+      this.workerSketchFetcher = new WorkerSketchFetcher(
+              netClient,
+              workerManager,
+              queryKernelConfig.isFaultTolerant(),
+              MultiStageQueryContext.getSketchEncoding(querySpec.getContext())
+      );
+      closer.register(workerSketchFetcher::close);
 
       final InputSpecSlicerFactory inputSpecSlicerFactory =
           makeInputSpecSlicerFactory(context.newTableInputSpecSlicer(workerManager));
@@ -281,7 +290,7 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
       }
     }
 
-    boolean shouldWaitForSegmentLoad = MultiStageQueryContext.shouldWaitForSegmentLoad(querySpec.getQuery().context());
+    boolean shouldWaitForSegmentLoad = MultiStageQueryContext.shouldWaitForSegmentLoad(querySpec.getContext());
 
     return finalizeTaskRunning(
         queryKernel,
@@ -315,7 +324,6 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
   private QueryDefinition initializeQueryDefAndState(final Closer closer)
   {
     this.selfDruidNode = context.selfNode();
-    this.netClient = closer.register(new ExceptionWrappingWorkerClient(context.newWorkerClient()));
     this.queryKernelConfig = context.queryKernelConfig(queryId, querySpec);
 
     final QueryContext queryContext = querySpec.getQuery().context();
@@ -368,13 +376,6 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
                 )
             )
     );
-    this.workerSketchFetcher = new WorkerSketchFetcher(
-        netClient,
-        workerManager,
-        queryKernelConfig.isFaultTolerant(),
-        MultiStageQueryContext.getSketchEncoding(querySpec.getQuery().context())
-    );
-    closer.register(workerSketchFetcher::close);
 
     return queryDef;
   }
@@ -387,18 +388,23 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
     if (!queryKernel.isSuccess()) {
       return;
     }
-    if (MSQControllerTask.isExport(querySpec)) {
+    if (MSQControllerTask.isExport(querySpec.getDestination())) {
       // Write manifest file.
       ExportMSQDestination destination = (ExportMSQDestination) querySpec.getDestination();
-      ExportMetadataManager exportMetadataManager = new ExportMetadataManager(destination.getExportStorageProvider(), context.taskTempDir());
-
+      ExportMetadataManager exportMetadataManager = new ExportMetadataManager(
+              destination.getExportStorageProvider(),
+              context.taskTempDir()
+      );
       final StageId finalStageId = queryKernel.getStageId(queryDef.getFinalStageDefinition().getStageNumber());
       //noinspection unchecked
 
       Object resultObjectForStage = queryKernel.getResultObjectForStage(finalStageId);
       if (!(resultObjectForStage instanceof List)) {
         // This might occur if all workers are running on an older version. We are not able to write a manifest file in this case.
-        log.warn("Unable to create export manifest file. Received result[%s] from worker instead of a list of file names.", resultObjectForStage);
+        log.warn(
+                "Unable to create export manifest file. Received result[%s] from worker instead of a list of file names.",
+                resultObjectForStage
+        );
         return;
       }
       @SuppressWarnings("unchecked")

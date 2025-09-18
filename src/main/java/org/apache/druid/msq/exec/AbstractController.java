@@ -70,6 +70,7 @@ import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.java.util.common.granularity.Granularity;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
+import org.apache.druid.msq.counters.ChannelCounters;
 import org.apache.druid.msq.counters.CounterSnapshots;
 import org.apache.druid.msq.counters.CounterSnapshotsTree;
 import org.apache.druid.msq.indexing.InputChannelFactory;
@@ -897,14 +898,17 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
     if (retriableWorkOrders.size() != 0) {
       log.info("Submitting worker[%s] for relaunch because of fault[%s]", worker, fault);
       workerTaskLauncher.submitForRelaunch(worker);
-      workOrdersToRetry.compute(worker, (workerNumber, workOrders) -> {
-        if (workOrders == null) {
-          return new HashSet<>(retriableWorkOrders);
-        } else {
-          workOrders.addAll(retriableWorkOrders);
-          return workOrders;
-        }
-      });
+      workOrdersToRetry.compute(
+              worker,
+              (workerNumber, workOrders) -> {
+                if (workOrders == null) {
+                  return new HashSet<>(retriableWorkOrders);
+                } else {
+                  workOrders.addAll(retriableWorkOrders);
+                  return workOrders;
+                }
+              }
+      );
     } else {
       log.info(
           "Worker[%d] has no active workOrders that need relaunch therefore not relaunching",
@@ -1058,21 +1062,62 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
       stagesReport = null;
     }
 
-    return new MSQTaskReportPayload(
-        makeStatusReport(
-            taskStateForReport,
-            errorForReport,
-            workerWarnings,
-            queryStartTime,
-            new Interval(queryStartTime, DateTimes.nowUtc()).toDurationMillis(),
-            workerTaskLauncher,
-            segmentLoadWaiter,
-            segmentReport
-        ),
-        stagesReport,
-        countersSnapshot,
-        null
+    final MSQTaskReportPayload msqTaskReportPayload = new MSQTaskReportPayload(
+            makeStatusReport(
+                    taskStateForReport,
+                    errorForReport,
+                    workerWarnings,
+                    queryStartTime,
+                    new Interval(queryStartTime, DateTimes.nowUtc()).toDurationMillis(),
+                    workerManager,
+                    segmentLoadWaiter,
+                    segmentReport
+            ),
+            stagesReport,
+            countersSnapshot,
+            null
     );
+    // Emit summary metrics
+    emitSummaryMetrics(msqTaskReportPayload, querySpec);
+    return msqTaskReportPayload;
+  }
+
+  private void emitSummaryMetrics(final MSQTaskReportPayload msqTaskReportPayload, final MSQSpec querySpec)
+  {
+    final Set<Integer> stagesToInclude = new HashSet<>();
+    final MSQStagesReport stagesReport = msqTaskReportPayload.getStages();
+    if (stagesReport != null) {
+      for (MSQStagesReport.Stage stage : stagesReport.getStages()) {
+        boolean hasParentStage = stage.getStageDefinition()
+                .getInputSpecs()
+                .stream()
+                .anyMatch(stageInput -> stageInput instanceof StageInputSpec);
+        if (!hasParentStage) {
+          stagesToInclude.add(stage.getStageNumber());
+        }
+      }
+    }
+    long totalProcessedBytes = 0;
+
+    if (msqTaskReportPayload.getCounters() != null) {
+      totalProcessedBytes =
+              msqTaskReportPayload.getCounters()
+                      .copyMap()
+                      .entrySet()
+                      .stream()
+                      .filter(entry -> stagesReport == null || stagesToInclude.contains(entry.getKey()))
+                      .flatMap(counterSnapshotsMap -> counterSnapshotsMap.getValue().values().stream())
+                      .flatMap(counterSnapshots -> counterSnapshots.getMap().entrySet().stream())
+                      .filter(entry -> entry.getKey().startsWith("input"))
+                      .mapToLong(entry -> {
+                        ChannelCounters.Snapshot snapshot = (ChannelCounters.Snapshot) entry.getValue();
+                        return snapshot.getBytes() == null ? 0L : Arrays.stream(snapshot.getBytes()).sum();
+                      })
+                      .sum();
+    }
+
+    log.debug("Processed bytes[%d] for query[%s].", totalProcessedBytes, querySpec.getQuery());
+    context.emitMetric("ingest/input/bytes", totalProcessedBytes);
   }
 
   protected void initLoadWaiter(
@@ -1202,7 +1247,7 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
             workerNumber
         );
 
-        addToRetryQueue(queryKernel, workerNumber, new WorkerRpcFailedFault(workerId));
+        addToRetryQueue(queryKernel, workerNumber, new WorkerRpcFailedFault(workerId, workerResult.error().toString()));
       } else {
         // Nonretryable failure.
         throw new RuntimeException(workerResult.error());
@@ -1528,12 +1573,14 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
     for (final Map.Entry<DateTime, List<Pair<Integer, ClusterByPartition>>> bucketEntry : partitionsByBucket.entrySet()) {
       final int numSegmentsInTimeChunk = bucketEntry.getValue().size();
       if (numSegmentsInTimeChunk > maxNumSegments) {
-        throw new MSQException(new TooManySegmentsInTimeChunkFault(
-            bucketEntry.getKey(),
-            numSegmentsInTimeChunk,
-            maxNumSegments,
-            segmentGranularity
-        ));
+        throw new MSQException(
+                new TooManySegmentsInTimeChunkFault(
+                        bucketEntry.getKey(),
+                        numSegmentsInTimeChunk,
+                        maxNumSegments,
+                        segmentGranularity
+                )
+        );
       }
     }
   }
@@ -1717,17 +1764,20 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
               queryKernel.workOrdersSentForWorker(stageWorkOrders.getKey(), workerNumber);
 
               // remove successfully contacted workOrders from workOrdersToRetry
-              workOrdersToRetry.compute(workerNumber, (task, workOrderSet) -> {
-                if (workOrderSet == null
-                    || workOrderSet.size() == 0
-                    || !workOrderSet.remove(stageWorkOrders.getValue().get(workerNumber))) {
-                  throw new ISE("Worker[%s] with number[%d] orders not found", workerId, workerNumber);
-                }
-                if (workOrderSet.size() == 0) {
-                  return null;
-                }
-                return workOrderSet;
-              });
+              workOrdersToRetry.compute(
+                      workerNumber,
+                      (task, workOrderSet) -> {
+                        if (workOrderSet == null
+                                || workOrderSet.size() == 0
+                                || !workOrderSet.remove(stageWorkOrders.getValue().get(workerNumber))) {
+                          throw new ISE("Worker[%s] with number[%d] orders not found", workerId, workerNumber);
+                        }
+                        if (workOrderSet.size() == 0) {
+                          return null;
+                        }
+                        return workOrderSet;
+                      }
+              );
             },
             queryKernelConfig.isFaultTolerant()
         );
@@ -1809,9 +1859,10 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
           stageId,
           tasks.stream().map(workerManager::getWorkerNumber).collect(Collectors.toSet())
       );
-      workerSketchFetcher.inMemoryFullSketchMerging(AbstractController.this::addToKernelManipulationQueue,
-                                                    stageId, tasks,
-                                                    AbstractController.this::addToRetryQueue
+      workerSketchFetcher.inMemoryFullSketchMerging(
+              AbstractController.this::addToKernelManipulationQueue,
+              stageId, tasks,
+              AbstractController.this::addToRetryQueue
       );
     }
 
@@ -1841,7 +1892,7 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
     private void startStages() throws IOException, InterruptedException
     {
       final long maxInputBytesPerWorker =
-          MultiStageQueryContext.getMaxInputBytesPerWorker(querySpec.getQuery().context());
+          MultiStageQueryContext.getMaxInputBytesPerWorker(querySpec.getContext());
 
       logKernelStatus(queryDef.getQueryId(), queryKernel);
 
@@ -1901,7 +1952,7 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
       final StageId shuffleStageId = new StageId(queryDef.getQueryId(), shuffleStageNumber);
 
       final boolean isFailOnEmptyInsertEnabled =
-          MultiStageQueryContext.isFailOnEmptyInsertEnabled(querySpec.getQuery().context());
+          MultiStageQueryContext.isFailOnEmptyInsertEnabled(querySpec.getContext());
       final Boolean isShuffleStageOutputEmpty = queryKernel.isStageOutputEmpty(shuffleStageId);
       if (isFailOnEmptyInsertEnabled && Boolean.TRUE.equals(isShuffleStageOutputEmpty)) {
         throw new MSQException(new InsertCannotBeEmptyFault(getDataSourceForIngestion(querySpec)));
@@ -2054,7 +2105,6 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
 
     /**
      * Start a {@link ControllerQueryResultsReader} that pushes results to our {@link QueryListener}.
-     * <p>
      * The reader runs in a single-threaded executor that is created by this method, and shut down when results
      * are done being read.
      */
@@ -2069,12 +2119,12 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
 
       final InputChannelFactory inputChannelFactory;
 
-      if (queryKernelConfig.isDurableStorage() || MSQControllerTask.writeFinalStageResultsToDurableStorage(querySpec)) {
+      if (queryKernelConfig.isDurableStorage() || MSQControllerTask.writeFinalStageResultsToDurableStorage(querySpec.getDestination())) {
         inputChannelFactory = DurableStorageInputChannelFactory.createStandardImplementation(
             queryId(),
             MSQTasks.makeStorageConnector(context.injector()),
             closer,
-            MSQControllerTask.writeFinalStageResultsToDurableStorage(querySpec)
+                MSQControllerTask.writeFinalStageResultsToDurableStorage(querySpec.getDestination())
         );
       } else {
         inputChannelFactory = new WorkerInputChannelFactory(netClient, () -> taskIds);
@@ -2094,7 +2144,7 @@ public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTa
             resultReaderExec,
             RESULT_READER_CANCELLATION_ID,
             null,
-            MultiStageQueryContext.removeNullBytes(querySpec.getQuery().context())
+            MultiStageQueryContext.removeNullBytes(querySpec.getContext())
         );
 
         resultsChannel = ReadableConcatFrameChannel.open(

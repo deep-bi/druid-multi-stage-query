@@ -52,6 +52,7 @@ import org.apache.druid.msq.indexing.destination.MSQTerminalStageSpecFactory;
 import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
 import org.apache.druid.msq.util.MSQTaskQueryMakerUtils;
 import org.apache.druid.msq.util.MultiStageQueryContext;
+import org.apache.druid.msq.util.TaskQueryMakerUtil;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.QueryContexts;
 import org.apache.druid.query.aggregation.AggregatorFactory;
@@ -199,7 +200,7 @@ public class MSQTaskQueryMaker implements QueryMaker
     final MSQDestination destination;
 
     if (targetDataSource instanceof ExportDestination) {
-      destination = buildExportDestination((ExportDestination) targetDataSource, sqlQueryContext);
+      destination = TaskQueryMakerUtil.buildExportDestination((ExportDestination) targetDataSource, sqlQueryContext);
     } else if (targetDataSource instanceof TableDestination) {
       destination = buildTableDestination(
           targetDataSource,
@@ -212,21 +213,7 @@ public class MSQTaskQueryMaker implements QueryMaker
           replaceTimeChunks
       );
     } else {
-      final MSQSelectDestination msqSelectDestination = MultiStageQueryContext.getSelectDestination(sqlQueryContext);
-      if (msqSelectDestination.equals(MSQSelectDestination.TASKREPORT)) {
-        destination = TaskReportMSQDestination.instance();
-      } else if (msqSelectDestination.equals(MSQSelectDestination.DURABLESTORAGE)) {
-        destination = DurableStorageMSQDestination.instance();
-      } else {
-        throw InvalidInput.exception(
-            "Unsupported select destination [%s] provided in the query context. MSQ can currently write the select results to "
-            + "[%s]",
-            msqSelectDestination.getName(),
-            Arrays.stream(MSQSelectDestination.values())
-                  .map(MSQSelectDestination::getName)
-                  .collect(Collectors.joining(","))
-        );
-      }
+      destination = TaskQueryMakerUtil.selectDestination(sqlQueryContext);
     }
 
     final Map<String, Object> nativeQueryContextOverrides = new HashMap<>();
@@ -342,19 +329,6 @@ public class MSQTaskQueryMaker implements QueryMaker
                 )
                 .orElse(null);
     return replaceTimeChunks;
-  }
-
-  private static MSQDestination buildExportDestination(ExportDestination targetDataSource, QueryContext sqlQueryContext)
-  {
-    final MSQDestination destination;
-    ExportDestination exportDestination = targetDataSource;
-    ResultFormat format = ResultFormat.fromString(sqlQueryContext.getString(DruidSqlIngest.SQL_EXPORT_FILE_FORMAT));
-
-    destination = new ExportMSQDestination(
-        exportDestination.getStorageConnectorProvider(),
-        format
-    );
-    return destination;
   }
 
   private static MSQDestination buildTableDestination(

@@ -19,13 +19,11 @@
 
 package org.apache.druid.msq.nql;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
 import org.apache.druid.common.guava.FutureUtils;
 import org.apache.druid.error.DruidException;
 import org.apache.druid.error.InvalidInput;
-import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.java.util.common.granularity.Granularity;
 import org.apache.druid.java.util.common.guava.Sequences;
 import org.apache.druid.msq.exec.MSQTasks;
@@ -46,7 +44,6 @@ import org.apache.druid.segment.IndexSpec;
 import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.server.QueryResponse;
 import org.apache.druid.sql.calcite.parser.DruidSqlIngest;
-import org.apache.druid.sql.calcite.parser.DruidSqlInsert;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
 import org.apache.druid.sql.destination.ExportDestination;
 import org.apache.druid.sql.destination.IngestDestination;
@@ -59,11 +56,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 public class MSQNativeTaskQueryMaker
 {
-  private static final Granularity DEFAULT_SEGMENT_GRANULARITY = Granularities.ALL;
 
   private final IngestDestination targetDataSource;
   private final OverlordClient overlordClient;
@@ -99,19 +94,6 @@ public class MSQNativeTaskQueryMaker
       MSQMode.populateDefaultQueryContext(msqMode, nativeQueryContext);
     }
 
-    Object segmentGranularity =
-        Optional.ofNullable(queryContext.get(DruidSqlInsert.SQL_INSERT_SEGMENT_GRANULARITY))
-                .orElseGet(() -> {
-                  try {
-                    return jsonMapper.writeValueAsString(DEFAULT_SEGMENT_GRANULARITY);
-                  }
-                  catch (JsonProcessingException e) {
-                    // This would only be thrown if we are unable to serialize the DEFAULT_SEGMENT_GRANULARITY,
-                    // which we don't expect to happen.
-                    throw DruidException.defensive().build(e, "Unable to serialize DEFAULT_SEGMENT_GRANULARITY");
-                  }
-                });
-
     final int maxNumTasks = MultiStageQueryContext.getMaxNumTasks(queryContext);
 
     if (maxNumTasks < 2) {
@@ -126,49 +108,10 @@ public class MSQNativeTaskQueryMaker
     final IndexSpec indexSpec = MultiStageQueryContext.getIndexSpec(queryContext, jsonMapper);
     final boolean finalizeAggregations = MultiStageQueryContext.isFinalizeAggregations(queryContext);
 
-    final List<Interval> replaceTimeChunks = TaskQueryMakerUtil.replaceTimeChunks(queryContext);
-
     final MSQDestination destination;
 
     if (targetDataSource instanceof ExportDestination) {
-      ExportDestination exportDestination = ((ExportDestination) targetDataSource);
-      ResultFormat format = ResultFormat.fromString(queryContext.getString(DruidSqlIngest.SQL_EXPORT_FILE_FORMAT));
-
-      destination = new ExportMSQDestination(
-          exportDestination.getStorageConnectorProvider(),
-          format
-      );
-    } else if (targetDataSource instanceof TableDestination) {
-      Granularity segmentGranularityObject;
-      try {
-        segmentGranularityObject = jsonMapper.readValue((String) segmentGranularity, Granularity.class);
-      }
-      catch (Exception e) {
-        throw DruidException.defensive()
-                            .build(
-                                e,
-                                "Unable to deserialize the provided segmentGranularity [%s]. "
-                                + "This is populated internally by Druid and therefore should not occur. "
-                                + "Please contact the developers if you are seeing this error message.",
-                                segmentGranularity
-                            );
-      }
-
-      final List<String> segmentSortOrder = MultiStageQueryContext.getSortOrder(queryContext);
-
-      final DataSourceMSQDestination dataSourceMSQDestination = new DataSourceMSQDestination(
-          targetDataSource.getDestinationName(),
-          segmentGranularityObject,
-          segmentSortOrder,
-          replaceTimeChunks,
-          null,
-          null // Used for ingestion only
-      );
-      MultiStageQueryContext.validateAndGetTaskLockType(
-          queryContext,
-          dataSourceMSQDestination.isReplaceTimeChunks()
-      );
-      destination = dataSourceMSQDestination;
+      destination = TaskQueryMakerUtil.buildExportDestination((ExportDestination) targetDataSource, queryContext);
     } else {
       destination = TaskQueryMakerUtil.selectDestination(queryContext);
     }

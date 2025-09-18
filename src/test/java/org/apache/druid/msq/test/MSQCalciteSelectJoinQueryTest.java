@@ -27,6 +27,7 @@ import org.apache.druid.sql.calcite.CalciteJoinQueryTest;
 import org.apache.druid.sql.calcite.QueryTestBuilder;
 import org.apache.druid.sql.calcite.SqlTestFrameworkConfig;
 import org.apache.druid.sql.calcite.planner.PlannerContext;
+
 import java.util.Map;
 
 /**
@@ -95,7 +96,7 @@ public class MSQCalciteSelectJoinQueryTest
       return new QueryTestBuilder(new CalciteTestConfig(defaultCtx, true))
           .addCustomRunner(
               new ExtractResultsFactory(
-                  () -> (MSQTestOverlordServiceClient) ((MSQTaskSqlEngine) queryFramework().engine()).overlordClient()))
+                  () -> (MSQSQLTestOverlordServiceClient) ((MSQTaskSqlEngine) queryFramework().engine()).overlordClient()))
           .skipVectorize(true);
     }
   }
