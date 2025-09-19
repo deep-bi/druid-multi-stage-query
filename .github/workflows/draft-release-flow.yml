@@ -1,0 +1,122 @@
+name: Draft release
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Druid ref for web-console (e.g. 33.0.0 or druid-33.0.0)"
+        required: true
+permissions:
+  contents: write
+
+jobs:
+  draft_release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure release-candidate branch
+        run: |
+          echo "Running on: $GITHUB_REF_NAME"
+          [[ "$GITHUB_REF_NAME" =~ -rc$ ]] || { echo "Run from a *-rc branch"; exit 1; }
+
+      - name: Setup JDK 11
+        uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "11" }
+
+      - name: Build MSQ + tests
+        run: mvn clean test -B
+
+      - name: Package MSQ jars
+        run: |
+          mkdir -p dist
+          mvn -q -DskipTests package
+          find . -path '*/target/*.jar' -not -path './external-druid/*' -exec cp -n {} dist/ \; || true
+
+      - name: Normalize upstream ref
+        id: ref
+        run: |
+          REF="${{ inputs.upstream_ref }}"
+          [[ "$REF" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]] && REF="druid-$REF"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Sparse checkout apache/druid@ref
+        run: |
+          set -e
+          rm -rf external-druid
+          git init external-druid
+          git -C external-druid remote add origin https://github.com/apache/druid.git
+          git -C external-druid config core.sparseCheckout true
+          {
+            echo "web-console/"
+            echo "licenses/"
+            echo "codestyle/"
+            echo "docs/"
+          } > external-druid/.git/info/sparse-checkout
+          git -C external-druid fetch --depth 1 origin "${{ steps.ref.outputs.ref }}" || git -C external-druid fetch --depth 1 origin "refs/tags/${{ steps.ref.outputs.ref }}"
+          git -C external-druid checkout --detach FETCH_HEAD
+          [ -d external-druid/codestyle ] && mv external-druid/codestyle external-druid/web-console/
+          [ -d external-druid/licenses ] && mv external-druid/licenses external-druid/web-console/
+
+      - name: Apply web-console patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH="$(git rev-parse --show-toplevel)/.github/patches/web-console.patch"
+          [ -s "$PATCH" ] || { echo "::error ::patch missing/empty"; exit 1; }
+          echo "Applying $PATCH ..."
+          git -C external-druid apply --check "$PATCH"
+          git -C external-druid apply --stat "$PATCH"
+          git -C external-druid apply --reject --whitespace=nowarn "$PATCH"
+          REJ=$(find external-druid -name "*.rej" | wc -l | tr -d ' ')
+          if [ "$REJ" -gt 0 ]; then
+            echo "::error title=Patch rejects::${REJ} hunk(s) failed"
+            find external-druid -name "*.rej" -o -name "*.orig" -print
+            exit 1
+          fi
+          echo "Patch applied cleanly."
+
+      - name: Setup Node for web-console
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Web-console unit tests
+        run: |
+          set -e
+          cd external-druid/web-console
+          npm ci --no-audit --no-fund
+          script/create-sql-docs.mjs
+          npx jest --ci
+
+      - name: Build web-console jar
+        run: |
+          set -e
+          ( cd external-druid/web-console && mvn -q -Dpmd.skip=true -DskipTests clean package )
+          cp external-druid/web-console/target/*.jar dist/
+
+      - name: Create draft release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: draft-${{ inputs.upstream_ref }}-${{ github.run_number }}
+          release_name: "Draft for IT ${{ github.ref_name }} (run ${{ github.run_number }})"
+          draft: true
+          target_commitish: ${{ github.ref_name }}
+
+      - name: Zip artifacts
+        run: |
+          (cd dist && zip -r ../draft-artifacts.zip .)
+
+      - name: Upload artifacts
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: draft-artifacts.zip
+          asset_name: draft-artifacts-${{ inputs.upstream_ref }}-${{ github.run_number }}.zip
+          asset_content_type: application/zip
