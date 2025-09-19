@@ -22,16 +22,12 @@ package org.apache.druid.msq.nql;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
 import org.apache.druid.common.guava.FutureUtils;
-import org.apache.druid.error.DruidException;
 import org.apache.druid.error.InvalidInput;
-import org.apache.druid.java.util.common.granularity.Granularity;
 import org.apache.druid.java.util.common.guava.Sequences;
 import org.apache.druid.msq.exec.MSQTasks;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.indexing.MSQTuningConfig;
-import org.apache.druid.msq.indexing.destination.DataSourceMSQDestination;
-import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
 import org.apache.druid.msq.sql.MSQMode;
 import org.apache.druid.msq.util.MultiStageQueryContext;
@@ -43,18 +39,13 @@ import org.apache.druid.rpc.indexing.OverlordClient;
 import org.apache.druid.segment.IndexSpec;
 import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.server.QueryResponse;
-import org.apache.druid.sql.calcite.parser.DruidSqlIngest;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
 import org.apache.druid.sql.destination.ExportDestination;
 import org.apache.druid.sql.destination.IngestDestination;
-import org.apache.druid.sql.destination.TableDestination;
-import org.apache.druid.sql.http.ResultFormat;
-import org.joda.time.Interval;
 
 import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 public class MSQNativeTaskQueryMaker

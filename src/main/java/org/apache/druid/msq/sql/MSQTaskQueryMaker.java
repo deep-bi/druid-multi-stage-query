@@ -44,12 +44,8 @@ import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.indexing.MSQTuningConfig;
 import org.apache.druid.msq.indexing.destination.DataSourceMSQDestination;
-import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
-import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
-import org.apache.druid.msq.indexing.destination.MSQSelectDestination;
 import org.apache.druid.msq.indexing.destination.MSQTerminalStageSpecFactory;
-import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
 import org.apache.druid.msq.util.MSQTaskQueryMakerUtils;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.msq.util.TaskQueryMakerUtil;
@@ -61,7 +57,6 @@ import org.apache.druid.segment.IndexSpec;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.server.QueryResponse;
 import org.apache.druid.server.lookup.cache.LookupLoadingSpec;
-import org.apache.druid.sql.calcite.parser.DruidSqlIngest;
 import org.apache.druid.sql.calcite.parser.DruidSqlInsert;
 import org.apache.druid.sql.calcite.parser.DruidSqlReplace;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
@@ -76,12 +71,10 @@ import org.apache.druid.sql.destination.ExportDestination;
 import org.apache.druid.sql.destination.IngestDestination;
 import org.apache.druid.sql.destination.TableDestination;
 import org.apache.druid.sql.hook.DruidHook;
-import org.apache.druid.sql.http.ResultFormat;
 import org.joda.time.Interval;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -230,10 +223,20 @@ public class MSQTaskQueryMaker implements QueryMaker
                .columnMappings(new ColumnMappings(QueryUtils.buildColumnMappings(fieldMapping, druidQuery)))
                .destination(destination)
                .assignmentStrategy(MultiStageQueryContext.getAssignmentStrategy(sqlQueryContext))
-               .tuningConfig(new MSQTuningConfig(maxNumWorkers, maxRowsInMemory, rowsPerSegment, maxNumSegments, indexSpec))
+               .tuningConfig(new MSQTuningConfig(
+                   maxNumWorkers,
+                   maxRowsInMemory,
+                   rowsPerSegment,
+                   maxNumSegments,
+                   indexSpec
+               ))
                .build();
 
-    MSQTaskQueryMakerUtils.validateRealtimeReindex(querySpec.getContext(), querySpec.getDestination(), querySpec.getQuery());
+    MSQTaskQueryMakerUtils.validateRealtimeReindex(
+        querySpec.getContext(),
+        querySpec.getDestination(),
+        querySpec.getQuery()
+    );
 
     return querySpec.withOverriddenContext(nativeQueryContext);
   }

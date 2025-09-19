@@ -106,6 +106,7 @@ import org.apache.druid.timeline.partition.ShardSpec;
 import org.apache.druid.utils.CollectionUtils;
 import org.joda.time.Interval;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -119,7 +120,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import javax.annotation.Nullable;
 
 public class ControllerImpl extends AbstractController<MSQControllerTask>
 {
@@ -331,7 +331,7 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     }
   }
 
-   private static Function<Set<DataSegment>, Set<DataSegment>> addCompactionStateToSegments(
+  private static Function<Set<DataSegment>, Set<DataSegment>> addCompactionStateToSegments(
       MSQSpec querySpec,
       ObjectMapper jsonMapper,
       DataSchema dataSchema,
@@ -388,7 +388,7 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     GranularitySpec granularitySpec = new UniformGranularitySpec(
         segmentGranularity,
         querySpec.getContext()
-                .getGranularity(DruidSqlInsert.SQL_INSERT_QUERY_GRANULARITY, jsonMapper),
+                 .getGranularity(DruidSqlInsert.SQL_INSERT_QUERY_GRANULARITY, jsonMapper),
         dataSchema.getGranularitySpec().isRollup(),
         // Not using dataSchema.getGranularitySpec().inputIntervals() as that always has ETERNITY
         ((DataSourceMSQDestination) querySpec.getDestination()).getReplaceTimeChunks()
@@ -396,8 +396,8 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
 
     DimensionsSpec dimensionsSpec = dataSchema.getDimensionsSpec();
     CompactionTransformSpec transformSpec = TransformSpec.NONE.equals(dataSchema.getTransformSpec())
-            ? null
-            : CompactionTransformSpec.of(dataSchema.getTransformSpec());
+                                            ? null
+                                            : CompactionTransformSpec.of(dataSchema.getTransformSpec());
     List<AggregatorFactory> metricsSpec = Collections.emptyList();
 
     if (querySpec.getQuery() instanceof GroupByQuery) {
@@ -408,12 +408,12 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       // Collect all aggregators that are part of the current dataSchema, since a non-rollup query (isRollup() is false)
       // moves metrics columns to dimensions in the final schema.
       Set<String> aggregatorsInDataSchema = Arrays.stream(dataSchema.getAggregators())
-              .map(AggregatorFactory::getName)
-              .collect(Collectors.toSet());
+                                                  .map(AggregatorFactory::getName)
+                                                  .collect(Collectors.toSet());
       metricsSpec = groupByQuery.getAggregatorSpecs()
-              .stream()
-              .filter(aggregatorFactory -> aggregatorsInDataSchema.contains(aggregatorFactory.getName()))
-              .collect(Collectors.toList());
+                                .stream()
+                                .filter(aggregatorFactory -> aggregatorsInDataSchema.contains(aggregatorFactory.getName()))
+                                .collect(Collectors.toList());
     }
 
     IndexSpec indexSpec = tuningConfig.getIndexSpec();
@@ -421,13 +421,13 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     log.info("Query[%s] storing compaction state in segments.", queryId);
 
     return CompactionState.addCompactionStateToSegments(
-            partitionSpec,
-            dimensionsSpec,
-            metricsSpec,
-            transformSpec,
-            indexSpec,
-            granularitySpec,
-            dataSchema.getProjections()
+        partitionSpec,
+        dimensionsSpec,
+        metricsSpec,
+        transformSpec,
+        indexSpec,
+        granularitySpec,
+        dataSchema.getProjections()
     );
   }
 
@@ -458,10 +458,10 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
 
       this.netClient = closer.register(new ExceptionWrappingWorkerClient(context.newWorkerClient()));
       this.workerSketchFetcher = new WorkerSketchFetcher(
-              netClient,
-              workerManager,
-              queryKernelConfig.isFaultTolerant(),
-              MultiStageQueryContext.getSketchEncoding(querySpec.getContext())
+          netClient,
+          workerManager,
+          queryKernelConfig.isFaultTolerant(),
+          MultiStageQueryContext.getSketchEncoding(querySpec.getContext())
       );
       closer.register(workerSketchFetcher::close);
 
@@ -594,7 +594,13 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     this.queryKernelConfig = context.queryKernelConfig(queryId, querySpec);
 
     final QueryContext queryContext = querySpec.getContext();
-    QueryKitBasedMSQPlanner qkPlanner = new QueryKitBasedMSQPlanner(context, querySpec, resultsContext, queryKernelConfig, queryId);
+    QueryKitBasedMSQPlanner qkPlanner = new QueryKitBasedMSQPlanner(
+        context,
+        querySpec,
+        resultsContext,
+        queryKernelConfig,
+        queryId
+    );
 
     final QueryDefinition queryDef = qkPlanner.makeQueryDefinition();
 
@@ -765,10 +771,10 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       Set<DataSegment> segments = (Set<DataSegment>) queryKernel.getResultObjectForStage(finalStageId);
 
       boolean storeCompactionState = querySpec.getContext()
-              .getBoolean(
-                      Tasks.STORE_COMPACTION_STATE_KEY,
-                      Tasks.DEFAULT_STORE_COMPACTION_STATE
-              );
+                                              .getBoolean(
+                                                  Tasks.STORE_COMPACTION_STATE_KEY,
+                                                  Tasks.DEFAULT_STORE_COMPACTION_STATE
+                                              );
 
       if (storeCompactionState) {
         DataSourceMSQDestination destination = (DataSourceMSQDestination) querySpec.getDestination();
@@ -801,8 +807,8 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       // Write manifest file.
       ExportMSQDestination destination = (ExportMSQDestination) querySpec.getDestination();
       ExportMetadataManager exportMetadataManager = new ExportMetadataManager(
-              destination.getExportStorageProvider(),
-              context.taskTempDir()
+          destination.getExportStorageProvider(),
+          context.taskTempDir()
       );
       final StageId finalStageId = queryKernel.getStageId(queryDef.getFinalStageDefinition().getStageNumber());
       //noinspection unchecked
@@ -812,8 +818,8 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       if (!(resultObjectForStage instanceof List)) {
         // This might occur if all workers are running on an older version. We are not able to write a manifest file in this case.
         log.warn(
-                "Unable to create export manifest file. Received result[%s] from worker instead of a list of file names.",
-                resultObjectForStage
+            "Unable to create export manifest file. Received result[%s] from worker instead of a list of file names.",
+            resultObjectForStage
         );
         return;
       }

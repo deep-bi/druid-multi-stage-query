@@ -96,7 +96,7 @@ public class MSQSQLTestOverlordServiceClient extends MSQTestOverlordServiceClien
       throw new ISE(e, "Unable to run");
     }
     finally {
-      if (queryListener != null && queryListener.getReportMap() != null) {
+      if (queryListener != null && queryListener.reportMap != null) {
         reports.put(controller.queryId(), queryListener.getReportMap());
       }
     }

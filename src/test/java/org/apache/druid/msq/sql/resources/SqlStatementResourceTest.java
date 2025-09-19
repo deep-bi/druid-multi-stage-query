@@ -641,7 +641,15 @@ public class SqlStatementResourceTest extends MSQTestBase
 
   public static void assertNotFound(Response response, String queryId)
   {
-    assertExceptionMessage(response, StringUtils.format("Query [%s] was not found. The query details are no longer present or might not be of the type [%s]. Verify that the id is correct.", queryId, MSQControllerTask.TYPE), Response.Status.NOT_FOUND);
+    assertExceptionMessage(
+        response,
+        StringUtils.format(
+            "Query [%s] was not found. The query details are no longer present or might not be of the type [%s]. Verify that the id is correct.",
+            queryId,
+            MSQControllerTask.TYPE
+        ),
+        Response.Status.NOT_FOUND
+    );
   }
 
   public static void assertExceptionMessage(
@@ -698,11 +706,11 @@ public class SqlStatementResourceTest extends MSQTestBase
   @Nullable
   private Object getHeader(Response resp, String header)
   {
-      final List<Object> objects = resp.getMetadata().get(header);
-      if (objects == null) {
-          return null;
-      }
-      return Iterables.getOnlyElement(objects);
+    final List<Object> objects = resp.getMetadata().get(header);
+    if (objects == null) {
+      return null;
+    }
+    return Iterables.getOnlyElement(objects);
   }
 
   @BeforeEach
@@ -815,6 +823,7 @@ public class SqlStatementResourceTest extends MSQTestBase
         resource.deleteQuery(RUNNING_SELECT_MSQ_QUERY, makeOkRequest()).getStatus()
     );
   }
+
   @Test
   public void testFinishedSelectMSQQuery() throws Exception
   {
@@ -837,7 +846,13 @@ public class SqlStatementResourceTest extends MSQTestBase
         null
     )), objectMapper.writeValueAsString(response.getEntity()));
 
-    Response resultsResponse = resource.doGetResults(FINISHED_SELECT_MSQ_QUERY, 0L, ResultFormat.OBJECTLINES.name(), null, makeOkRequest());
+    Response resultsResponse = resource.doGetResults(
+        FINISHED_SELECT_MSQ_QUERY,
+        0L,
+        ResultFormat.OBJECTLINES.name(),
+        null,
+        makeOkRequest()
+    );
     Assert.assertEquals(Response.Status.OK.getStatusCode(), resultsResponse.getStatus());
 
     String expectedResult = "{\"_time\":123,\"alias\":\"foo\",\"market\":\"bar\"}\n"
@@ -880,39 +895,63 @@ public class SqlStatementResourceTest extends MSQTestBase
     );
 
     Assert.assertEquals(
-            "attachment; filename=\"my-file.ndjson\"",
-            getHeader(
-                    resource.doGetResults(FINISHED_SELECT_MSQ_QUERY, 0L, ResultFormat.OBJECTLINES.name(), "my-file.ndjson", makeOkRequest()),
-                    SqlStatementResource.CONTENT_DISPOSITION_RESPONSE_HEADER
-            )
+        "attachment; filename=\"my-file.ndjson\"",
+        getHeader(
+            resource.doGetResults(
+                FINISHED_SELECT_MSQ_QUERY,
+                0L,
+                ResultFormat.OBJECTLINES.name(),
+                "my-file.ndjson",
+                makeOkRequest()
+            ),
+            SqlStatementResource.CONTENT_DISPOSITION_RESPONSE_HEADER
+        )
     );
   }
 
   @Test
   public void testDownloadResultsAsFile() throws Exception
   {
-      final String expectedResult = "{\"_time\":123,\"alias\":\"foo\",\"market\":\"bar\"}\n"
-              + "{\"_time\":234,\"alias\":\"foo1\",\"market\":\"bar1\"}\n\n";
+    final String expectedResult = "{\"_time\":123,\"alias\":\"foo\",\"market\":\"bar\"}\n"
+                                  + "{\"_time\":234,\"alias\":\"foo1\",\"market\":\"bar1\"}\n\n";
 
-      Response resultsResponse1 = resource.doGetResults(FINISHED_SELECT_MSQ_QUERY, 0L, ResultFormat.OBJECTLINES.name(), "results.txt", makeOkRequest());
-      Assert.assertEquals(Response.Status.OK.getStatusCode(), resultsResponse1.getStatus());
-      Assert.assertEquals(
-              "attachment; filename=\"results.txt\"",
-              getHeader(resultsResponse1, "Content-Disposition")
-      );
-      assertExpectedResults(expectedResult, resultsResponse1);
+    Response resultsResponse1 = resource.doGetResults(
+        FINISHED_SELECT_MSQ_QUERY,
+        0L,
+        ResultFormat.OBJECTLINES.name(),
+        "results.txt",
+        makeOkRequest()
+    );
+    Assert.assertEquals(Response.Status.OK.getStatusCode(), resultsResponse1.getStatus());
+    Assert.assertEquals(
+        "attachment; filename=\"results.txt\"",
+        getHeader(resultsResponse1, "Content-Disposition")
+    );
+    assertExpectedResults(expectedResult, resultsResponse1);
 
-      Response resultsResponse2 = resource.doGetResults(FINISHED_SELECT_MSQ_QUERY, 0L, ResultFormat.OBJECTLINES.name(), "final results.txt", makeOkRequest());
-      Assert.assertEquals(Response.Status.OK.getStatusCode(), resultsResponse2.getStatus());
-      Assert.assertEquals(
-              "attachment; filename=\"final results.txt\"",
-              getHeader(resultsResponse2, "Content-Disposition")
-      );
-      assertExpectedResults(expectedResult, resultsResponse2);
+    Response resultsResponse2 = resource.doGetResults(
+        FINISHED_SELECT_MSQ_QUERY,
+        0L,
+        ResultFormat.OBJECTLINES.name(),
+        "final results.txt",
+        makeOkRequest()
+    );
+    Assert.assertEquals(Response.Status.OK.getStatusCode(), resultsResponse2.getStatus());
+    Assert.assertEquals(
+        "attachment; filename=\"final results.txt\"",
+        getHeader(resultsResponse2, "Content-Disposition")
+    );
+    assertExpectedResults(expectedResult, resultsResponse2);
 
-      Response resultsResponse3 = resource.doGetResults(FINISHED_SELECT_MSQ_QUERY, 0L, ResultFormat.OBJECTLINES.name(), "/Users/Name/final.txt", makeOkRequest());
-      Assert.assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), resultsResponse3.getStatus());
-      Assert.assertNull(resultsResponse3.getMetadata().get("Content-Disposition"));
+    Response resultsResponse3 = resource.doGetResults(
+        FINISHED_SELECT_MSQ_QUERY,
+        0L,
+        ResultFormat.OBJECTLINES.name(),
+        "/Users/Name/final.txt",
+        makeOkRequest()
+    );
+    Assert.assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), resultsResponse3.getStatus());
+    Assert.assertNull(resultsResponse3.getMetadata().get("Content-Disposition"));
   }
 
   private void assertExpectedResults(String expectedResult, Response resultsResponse) throws IOException
@@ -974,11 +1013,11 @@ public class SqlStatementResourceTest extends MSQTestBase
     );
 
     Assert.assertEquals(
-            "attachment; filename=\"my-file.ndjson\"",
-            getHeader(
-                    resource.doGetResults(FINISHED_INSERT_MSQ_QUERY, 0L, null, "my-file.ndjson", makeOkRequest()),
-                    SqlStatementResource.CONTENT_DISPOSITION_RESPONSE_HEADER
-            )
+        "attachment; filename=\"my-file.ndjson\"",
+        getHeader(
+            resource.doGetResults(FINISHED_INSERT_MSQ_QUERY, 0L, null, "my-file.ndjson", makeOkRequest()),
+            SqlStatementResource.CONTENT_DISPOSITION_RESPONSE_HEADER
+        )
     );
   }
 
@@ -1269,43 +1308,67 @@ public class SqlStatementResourceTest extends MSQTestBase
     }
   }
 
-    @Test
-    public void testValidFilename()
-    {
-        // Valid cases
-        AbstractStatementResource.validateFilename("testname");
-        AbstractStatementResource.validateFilename("A.txt");
-        AbstractStatementResource.validateFilename("final-results.txt");
-        AbstractStatementResource.validateFilename("final results.txt");
-        AbstractStatementResource.validateFilename("final;results.txt");
-        AbstractStatementResource.validateFilename("final@results.txt");
+  @Test
+  public void testValidFilename()
+  {
+    // Valid cases
+    AbstractStatementResource.validateFilename("testname");
+    AbstractStatementResource.validateFilename("A.txt");
+    AbstractStatementResource.validateFilename("final-results.txt");
+    AbstractStatementResource.validateFilename("final results.txt");
+    AbstractStatementResource.validateFilename("final;results.txt");
+    AbstractStatementResource.validateFilename("final@results.txt");
 
-        // Empty
-        assertInvalidFileName("", "Filename cannot be empty.");
+    // Empty
+    assertInvalidFileName("", "Filename cannot be empty.");
 
-        // Too long
-        assertInvalidFileName(StringUtils.repeat("A", 300), "Filename cannot be longer than 255 characters.");
+    // Too long
+    assertInvalidFileName(StringUtils.repeat("A", 300), "Filename cannot be longer than 255 characters.");
 
-        // Special characters
-        assertInvalidFileName("He\\llo", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-        assertInvalidFileName("Hello/Name", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-        assertInvalidFileName("C:/Users/Name", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-        assertInvalidFileName("username:password", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-        assertInvalidFileName("A>ValueB", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-        assertInvalidFileName("A<ValueB", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-        assertInvalidFileName("A\0a11", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-        assertInvalidFileName("\rrB", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-        assertInvalidFileName("\nAnB", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-        assertInvalidFileName("A|B", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-        assertInvalidFileName("A\"B", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-        assertInvalidFileName("A?B", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
-    }
+    // Special characters
+    assertInvalidFileName(
+        "He\\llo",
+        "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)"
+    );
+    assertInvalidFileName(
+        "Hello/Name",
+        "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)"
+    );
+    assertInvalidFileName(
+        "C:/Users/Name",
+        "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)"
+    );
+    assertInvalidFileName(
+        "username:password",
+        "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)"
+    );
+    assertInvalidFileName(
+        "A>ValueB",
+        "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)"
+    );
+    assertInvalidFileName(
+        "A<ValueB",
+        "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)"
+    );
+    assertInvalidFileName(
+        "A\0a11",
+        "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)"
+    );
+    assertInvalidFileName("\rrB", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
+    assertInvalidFileName(
+        "\nAnB",
+        "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)"
+    );
+    assertInvalidFileName("A|B", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
+    assertInvalidFileName("A\"B", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
+    assertInvalidFileName("A?B", "Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
+  }
 
-    private void assertInvalidFileName(String filename, String errorMessage)
-    {
-        assertThat(
-                Assert.assertThrows(DruidException.class, () -> SqlStatementResource.validateFilename(filename)),
-                DruidExceptionMatcher.invalidInput().expectMessageIs(errorMessage)
-        );
-    }
+  private void assertInvalidFileName(String filename, String errorMessage)
+  {
+    assertThat(
+        Assert.assertThrows(DruidException.class, () -> SqlStatementResource.validateFilename(filename)),
+        DruidExceptionMatcher.invalidInput().expectMessageIs(errorMessage)
+    );
+  }
 }

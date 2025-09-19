@@ -280,10 +280,10 @@ public class MSQTestBase extends BaseCalciteQueryTest
                   .build();
 
   public static final Map<String, Object> SUPERUSER_MSQ_CONTEXT =
-            ImmutableMap.<String, Object>builder()
-                    .putAll(DEFAULT_MSQ_CONTEXT)
-                    .put(MSQTaskQueryMaker.USER_KEY, CalciteTests.SUPER_USER_AUTH_RESULT.getIdentity())
-                    .buildKeepingLast();
+      ImmutableMap.<String, Object>builder()
+                  .putAll(DEFAULT_MSQ_CONTEXT)
+                  .put(MSQTaskQueryMaker.USER_KEY, CalciteTests.SUPER_USER_AUTH_RESULT.getIdentity())
+                  .buildKeepingLast();
 
   public static final Map<String, Object> DURABLE_STORAGE_MSQ_CONTEXT =
       ImmutableMap.<String, Object>builder()
@@ -434,7 +434,8 @@ public class MSQTestBase extends BaseCalciteQueryTest
     ObjectMapper secondMapper = setupObjectMapper(secondInjector);
     indexIO = new IndexIO(secondMapper, ColumnConfig.DEFAULT);
 
-    segmentCacheManager = new SegmentCacheManagerFactory(TestIndex.INDEX_IO, secondMapper).manufacturate(newTempFolder("cacheManager"));
+    segmentCacheManager = new SegmentCacheManagerFactory(TestIndex.INDEX_IO, secondMapper).manufacturate(newTempFolder(
+        "cacheManager"));
 
     MSQSqlModule sqlModule = new MSQSqlModule();
 
@@ -478,7 +479,10 @@ public class MSQTestBase extends BaseCalciteQueryTest
           binder.bind(QueryProcessingPool.class)
                 .toInstance(new ForwardingQueryProcessingPool(Execs.singleThreaded("Test-runner-processing-pool")));
           binder.bind(DataSegmentProvider.class)
-                .toInstance((segmentId, channelCounters, isReindex) -> getSupplierForSegment(this::newTempFolder, segmentId));
+                .toInstance((segmentId, channelCounters, isReindex) -> getSupplierForSegment(
+                    this::newTempFolder,
+                    segmentId
+                ));
           binder.bind(DataServerQueryHandlerFactory.class).toInstance(getTestDataServerQueryHandlerFactory());
           binder.bind(IndexIO.class).toInstance(indexIO);
           binder.bind(SpecificSegmentsQuerySegmentWalker.class).toInstance(qf.walker());
@@ -672,7 +676,7 @@ public class MSQTestBase extends BaseCalciteQueryTest
       switch (segmentId.getDataSource()) {
         case DATASOURCE1:
         case RESTRICTED_DATASOURCE: // RESTRICTED_DATASOURCE share the same index as DATASOURCE1.
-              IncrementalIndexSchema foo1Schema = new IncrementalIndexSchema.Builder()
+          IncrementalIndexSchema foo1Schema = new IncrementalIndexSchema.Builder()
               .withMetrics(
                   new CountAggregatorFactory("cnt"),
                   new FloatSumAggregatorFactory("m1", "m1"),
@@ -763,7 +767,10 @@ public class MSQTestBase extends BaseCalciteQueryTest
                                          .shardSpec(new LinearShardSpec(0))
                                          .size(0)
                                          .build();
-    return () -> ReferenceCountingResourceHolder.fromCloseable(new CompleteSegment(dataSegment, segmentManager.getSegment(segmentId)));
+    return () -> ReferenceCountingResourceHolder.fromCloseable(new CompleteSegment(
+        dataSegment,
+        segmentManager.getSegment(segmentId)
+    ));
   }
 
   public SelectTester testSelectQuery()
@@ -825,10 +832,10 @@ public class MSQTestBase extends BaseCalciteQueryTest
   }
 
   private String runMultiStageQuery(
-          String query,
-          Map<String, Object> context,
-          AuthenticationResult authenticationResult,
-          List<TypedValue> parameters
+      String query,
+      Map<String, Object> context,
+      AuthenticationResult authenticationResult,
+      List<TypedValue> parameters
   )
   {
     final DirectStatement stmt = sqlStatementFactory.directStatement(
