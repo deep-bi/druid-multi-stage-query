@@ -394,6 +394,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
             sqlStatementResult.getQueryId(),
             null,
             ResultFormat.OBJECTLINES.name(),
+            null,
             SqlStatementResourceTest.makeOkRequest()
         ),
         objectMapper
@@ -407,6 +408,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
             sqlStatementResult.getQueryId(),
             0L,
             ResultFormat.OBJECTLINES.name(),
+            null,
             SqlStatementResourceTest.makeOkRequest()
         ),
         objectMapper
@@ -420,6 +422,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
             sqlStatementResult.getQueryId(),
             2L,
             ResultFormat.OBJECTLINES.name(),
+            null,
             SqlStatementResourceTest.makeOkRequest()
         ),
         objectMapper
@@ -486,6 +489,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
         sqlStatementResult.getQueryId(),
         null,
         ResultFormat.ARRAY.name(),
+        null,
         SqlStatementResourceTest.makeOkRequest()
     )));
 
@@ -493,6 +497,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
         sqlStatementResult.getQueryId(),
         0L,
         ResultFormat.ARRAY.name(),
+        null,
         SqlStatementResourceTest.makeOkRequest()
     )));
 
@@ -500,6 +505,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
         sqlStatementResult.getQueryId(),
         1L,
         ResultFormat.ARRAY.name(),
+        null,
         SqlStatementResourceTest.makeOkRequest()
     )));
 
@@ -507,6 +513,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
         sqlStatementResult.getQueryId(),
         2L,
         ResultFormat.ARRAY.name(),
+        null,
         SqlStatementResourceTest.makeOkRequest()
     )));
 
@@ -514,6 +521,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
         sqlStatementResult.getQueryId(),
         3L,
         ResultFormat.ARRAY.name(),
+        null,
         SqlStatementResourceTest.makeOkRequest()
     )));
 
@@ -521,6 +529,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
         sqlStatementResult.getQueryId(),
         4L,
         ResultFormat.ARRAY.name(),
+        null,
         SqlStatementResourceTest.makeOkRequest()
     )));
   }
@@ -566,6 +575,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
                   sqlStatementResult.getQueryId(),
                   null,
                   resultFormat.name(),
+                  null,
                   SqlStatementResourceTest.makeOkRequest()
               ), objectMapper
           )
@@ -578,6 +588,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
                   sqlStatementResult.getQueryId(),
                   0L,
                   resultFormat.name(),
+                  null,
                   SqlStatementResourceTest.makeOkRequest()
               ), objectMapper
           )
@@ -617,6 +628,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
         sqlStatementResult.getQueryId(),
         null,
         ResultFormat.ARRAY.name(),
+        null,
         SqlStatementResourceTest.makeOkRequest()
     )));
 
@@ -624,6 +636,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
         sqlStatementResult.getQueryId(),
         0L,
         ResultFormat.ARRAY.name(),
+        null,
         SqlStatementResourceTest.makeOkRequest()
     )));
   }
@@ -695,6 +708,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
         actual.getQueryId(),
         0L,
         null,
+        null,
         SqlStatementResourceTest.makeOkRequest()
     );
     Assert.assertEquals(Response.Status.OK.getStatusCode(), resultsResponse.getStatus());
@@ -737,6 +751,7 @@ public class SqlMSQStatementResourcePostTest extends MSQTestBase
     Response resultsResponse = resource.doGetResults(
         actual.getQueryId(),
         0L,
+        null,
         null,
         SqlStatementResourceTest.makeOkRequest()
     );

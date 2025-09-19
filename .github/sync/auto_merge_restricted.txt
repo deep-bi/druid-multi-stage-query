@@ -39,6 +39,7 @@ src/test/java/org/apache/druid/msq/sql/resources/SqlStatementResourceTest.java
 src/test/java/org/apache/druid/msq/exec/ControllerImplTest.java
 src/test/java/org/apache/druid/msq/exec/MSQDrillWindowQueryTest.java
 src/test/java/org/apache/druid/msq/exec/TestMSQSqlModule.java
+src/main/java/org/apache/druid/msq/sql/MSQTaskQueryMaker.java
 src/test/java/org/apache/druid/msq/indexing/TaskReportQueryListenerTest.java
 src/test/java/org/apache/druid/msq/test/CalciteArraysQueryMSQTest.java
 src/test/java/org/apache/druid/msq/test/CalciteSelectJoinQueryMSQTest.java

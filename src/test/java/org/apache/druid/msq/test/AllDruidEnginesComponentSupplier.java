@@ -17,24 +17,16 @@
  * under the License.
  */
 
-package org.apache.druid.guice.annotations;
+package org.apache.druid.msq.test;
 
-import com.google.inject.BindingAnnotation;
+import org.apache.druid.sql.calcite.MultiComponentSupplier;
+import org.apache.druid.sql.calcite.MultiComponentSupplier.ComponentSuppliers;
+import org.apache.druid.sql.calcite.util.SqlTestFramework.StandardComponentSupplier;
 
-import java.lang.annotation.ElementType;
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
-import java.lang.annotation.Target;
-
-/**
- * Binding annotation for implements of interfaces that are MSQ (MultiStageQuery) focused.  This is generally
- * contrasted with the NativeQ annotation.
- *
- * @see Parent
- */
-@Target({ElementType.FIELD, ElementType.PARAMETER, ElementType.METHOD})
-@Retention(RetentionPolicy.RUNTIME)
-@BindingAnnotation
-public @interface MSQ
+@ComponentSuppliers({
+    StandardComponentSupplier.class,
+    DartComponentSupplier.class,
+    StandardMSQComponentSupplier.class})
+public class AllDruidEnginesComponentSupplier extends MultiComponentSupplier
 {
 }

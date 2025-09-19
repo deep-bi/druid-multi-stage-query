@@ -20,6 +20,7 @@
 package org.apache.druid.msq;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.ListenableFuture;
 import org.apache.druid.common.guava.FutureUtils;
 import org.apache.druid.discovery.NodeRole;
@@ -70,16 +71,20 @@ import org.apache.druid.storage.NilStorageConnector;
 import org.apache.druid.storage.StorageConnector;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 
+import javax.validation.constraints.NotNull;
 import javax.ws.rs.core.Response;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public abstract class AbstractStatementResource<ResultType extends StatementResult, TaskType extends AbstractTask & IsMSQTask>
 {
+  public static final String CONTENT_DISPOSITION_RESPONSE_HEADER = "Content-Disposition";
+  protected static final Pattern FILENAME_PATTERN = Pattern.compile("^[^/:*?><\\\\\"|\0\n\r]*$");
   private static final Logger log = new Logger(AbstractStatementResource.class);
   protected final ObjectMapper jsonMapper;
   protected final OverlordClient overlordClient;
@@ -176,7 +181,6 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
 
     TaskType msqControllerTask = getTaskEntity(queryId);
     String queryUser = String.valueOf(msqControllerTask.getQuerySpec()
-                                                       .getQuery()
                                                        .getContext()
                                                        .get(MSQTaskQueryMaker.USER_KEY));
 
@@ -434,6 +438,42 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
     if (MSQSelectDestination.DURABLESTORAGE.equals(selectDestination)) {
       checkForDurableStorageConnectorImpl();
     }
+  }
+
+  protected static Response.ResponseBuilder addContentDisposition(
+          Response.ResponseBuilder responseBuilder,
+          String contentDisposition
+  )
+  {
+    if (contentDisposition != null) {
+      responseBuilder.header(CONTENT_DISPOSITION_RESPONSE_HEADER, contentDisposition);
+    }
+    return responseBuilder;
+  }
+
+  /**
+   * Validates that a filename is valid. Filenames are considered to be valid if it is:
+   * <ul>
+   *   <li>Not empty.</li>
+   *   <li>Not longer than 255 characters.</li>
+   *   <li>Does not contain the characters `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, `\0`, `\n`, or `\r`.</li>
+   * </ul>
+   */
+  @VisibleForTesting
+  public static String validateFilename(@NotNull String filename)
+  {
+    if (filename.isEmpty()) {
+      throw InvalidInput.exception("Filename cannot be empty.");
+    }
+
+    if (filename.length() > 255) {
+      throw InvalidInput.exception("Filename cannot be longer than 255 characters.");
+    }
+
+    if (!FILENAME_PATTERN.matcher(filename).matches()) {
+      throw InvalidInput.exception("Filename contains invalid characters. (/, \\, :, *, ?, \", <, >, |, \0, \n, or \r)");
+    }
+    return filename;
   }
 
   protected abstract Sequence<Object[]> getResultSequence(

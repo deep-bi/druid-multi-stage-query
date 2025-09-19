@@ -37,6 +37,7 @@ import org.apache.druid.guice.annotations.Json;
 import org.apache.druid.guice.annotations.Smile;
 import org.apache.druid.indexer.TaskStatusPlus;
 import org.apache.druid.java.util.common.ISE;
+import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.java.util.common.guava.Sequence;
 import org.apache.druid.java.util.common.guava.Yielder;
 import org.apache.druid.java.util.common.io.Closer;
@@ -267,6 +268,7 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
       @PathParam("id") final String queryId,
       @QueryParam("page") Long page,
       @QueryParam("resultFormat") String resultFormat,
+      @QueryParam("filename") String filename,
       @Context final HttpServletRequest req
   )
   {
@@ -300,6 +302,7 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
       );
       throwIfQueryIsNotSuccessful(queryId, statusPlus);
 
+      final String contentDispositionHeaderValue = filename != null ? StringUtils.format("attachment; filename=\"%s\"", validateFilename(filename)) : null;
 
       // returning results
       final Closer closer = Closer.create();
@@ -308,20 +311,20 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
       results = getResultYielder(queryId, page, msqControllerTask, closer);
       if (!results.isPresent()) {
         // no results, return empty
-        return Response.ok().build();
+        return addContentDisposition(Response.ok(), contentDispositionHeaderValue).build();
       }
 
       ResultFormat preferredFormat = getPreferredResultFormat(resultFormat, msqControllerTask.getQuerySpec());
-      return Response.ok((StreamingOutput) outputStream -> resultPusher(
+      final Response.ResponseBuilder responseBuilder = Response.ok((StreamingOutput) outputStream -> resultPusher(
           queryId,
           signature.getColumnNames(),
           closer,
           results,
           new CountingOutputStream(outputStream),
           preferredFormat
-      )).build();
+      ));
 
-
+      return addContentDisposition(responseBuilder, contentDispositionHeaderValue).build();
     }
 
     catch (DruidException e) {
@@ -521,7 +524,7 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
     if (resultFormatParam == null) {
       return QueryContexts.getAsEnum(
           RESULT_FORMAT,
-          msqSpec.getQuery().context().get(RESULT_FORMAT),
+          msqSpec.getContext().get(RESULT_FORMAT),
           ResultFormat.class,
           ResultFormat.DEFAULT_RESULT_FORMAT
       );

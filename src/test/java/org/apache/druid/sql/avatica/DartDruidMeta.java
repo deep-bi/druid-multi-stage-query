@@ -17,17 +17,22 @@
  * under the License.
  */
 
-package org.apache.druid.msq.indexing;
+package org.apache.druid.sql.avatica;
 
-import org.apache.druid.msq.indexing.error.MSQFault;
+import com.google.inject.Inject;
+import org.apache.druid.msq.dart.Dart;
+import org.apache.druid.server.security.AuthenticatorMapper;
+import org.apache.druid.sql.SqlStatementFactory;
 
-public interface RetryTask
+public class DartDruidMeta extends DruidMeta
 {
-  /**
-   * Retry task when {@link MSQFault} is encountered.
-   *
-   * @param workerTask
-   * @param msqFault
-   */
-  void retry(MSQWorkerTask workerTask, MSQFault msqFault);
+  @Inject
+  public DartDruidMeta(
+      final @Dart SqlStatementFactory sqlStatementFactory,
+      final AvaticaServerConfig config,
+      final ErrorHandler errorHandler,
+      final AuthenticatorMapper authMapper)
+  {
+    super(sqlStatementFactory, config, errorHandler, authMapper);
+  }
 }

@@ -409,6 +409,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
             nativeStatementResult.getQueryId(),
             null,
             ResultFormat.OBJECTLINES.name(),
+            null,
             SqlStatementResourceTest.makeOkRequest()
         ),
         objectMapper
@@ -422,6 +423,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
             nativeStatementResult.getQueryId(),
             0L,
             ResultFormat.OBJECTLINES.name(),
+            null,
             SqlStatementResourceTest.makeOkRequest()
         ),
         objectMapper
@@ -435,6 +437,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
             nativeStatementResult.getQueryId(),
             2L,
             ResultFormat.OBJECTLINES.name(),
+            null,
             SqlStatementResourceTest.makeOkRequest()
         ),
         objectMapper
@@ -485,6 +488,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
         response.getQueryId(),
         null,
         ResultFormat.ARRAY.name(),
+        null,
         SqlStatementResourceTest.makeOkRequest()
     )));
 
@@ -494,6 +498,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
             response.getQueryId(),
             0L,
             ResultFormat.ARRAY.name(),
+            null,
             SqlStatementResourceTest.makeOkRequest()
         ))
     );
@@ -504,6 +509,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
             response.getQueryId(),
             1L,
             ResultFormat.ARRAY.name(),
+            null,
             SqlStatementResourceTest.makeOkRequest()
         ))
     );
@@ -514,6 +520,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
             response.getQueryId(),
             2L,
             ResultFormat.ARRAY.name(),
+            null,
             SqlStatementResourceTest.makeOkRequest()
         ))
     );
@@ -524,6 +531,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
             response.getQueryId(),
             3L,
             ResultFormat.ARRAY.name(),
+            null,
             SqlStatementResourceTest.makeOkRequest()
         ))
     );
@@ -534,6 +542,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
             response.getQueryId(),
             4L,
             ResultFormat.ARRAY.name(),
+            null,
             SqlStatementResourceTest.makeOkRequest()
         ))
     );
@@ -564,6 +573,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
         response.getQueryId(),
         null,
         ResultFormat.ARRAY.name(),
+        null,
         SqlStatementResourceTest.makeOkRequest()
     )));
 
@@ -571,6 +581,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
         response.getQueryId(),
         0L,
         ResultFormat.ARRAY.name(),
+        null,
         SqlStatementResourceTest.makeOkRequest()
     )));
   }

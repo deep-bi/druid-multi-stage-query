@@ -234,7 +234,7 @@ public class DataServerQueryHandlerTest
                        .dataSource(DATASOURCE1)
                        .size(1)
                        .build(),
-            ImmutableSet.of(DRUID_SERVER_2)
+        ImmutableSet.of(DRUID_SERVER_2)
         ))).when(coordinatorClient).fetchServerViewSegments(DATASOURCE1, ImmutableList.of(SEGMENT_2.getFullInterval()));
 
     DataServerQueryResult<Object[]> dataServerQueryResult = target.fetchRowsFromDataServer(
