@@ -140,7 +140,7 @@ public class MSQResultsReport
     public static RowSignature toRowSignature(List<ColumnAndType> columnAndTypes)
     {
       final RowSignature.Builder builder = RowSignature.builder();
-      for (ColumnAndType columnAndType : columnAndTypes) {
+      for (MSQResultsReport.ColumnAndType columnAndType : columnAndTypes) {
         builder.add(columnAndType.getName(), columnAndType.getType());
       }
       RowSignature rowSignature = builder.build();

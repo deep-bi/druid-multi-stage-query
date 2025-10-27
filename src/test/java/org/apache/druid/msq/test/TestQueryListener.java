@@ -46,7 +46,7 @@ public class TestQueryListener implements QueryListener
   private List<MSQResultsReport.ColumnAndType> signature;
   private List<SqlTypeName> sqlTypeNames;
   private boolean resultsTruncated = true;
-  private TaskReport.ReportMap reportMap;
+  protected TaskReport.ReportMap reportMap;
 
   public TestQueryListener(final String taskId, final MSQDestination destination)
   {

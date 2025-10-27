@@ -91,7 +91,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-
 @Path("/druid/v2/sql/statements/")
 public class SqlStatementResource extends AbstractStatementResource<SqlStatementResult, MSQControllerTask>
 {
@@ -285,6 +284,7 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       @PathParam("id") final String queryId,
       @QueryParam("page") Long page,
       @QueryParam("resultFormat") String resultFormat,
+      @QueryParam("filename") String filename,
       @Context final HttpServletRequest req
   )
   {
@@ -318,10 +318,12 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       );
       throwIfQueryIsNotSuccessful(queryId, statusPlus);
 
+      final String contentDispositionHeaderValue = filename != null ? StringUtils.format("attachment; filename=\"%s\"", validateFilename(filename)) : null;
+
       Optional<List<ColumnNameAndTypes>> signature = SqlStatementResourceHelper.getSignature(msqControllerTask);
       if (!signature.isPresent() || MSQControllerTask.isIngestion(msqControllerTask.getQuerySpec())) {
         // Since it's not a select query, nothing to return.
-        return Response.ok().build();
+        return addContentDisposition(Response.ok(), contentDispositionHeaderValue).build();
       }
 
       // returning results
@@ -330,18 +332,20 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       results = getResultYielder(queryId, page, msqControllerTask, closer);
       if (!results.isPresent()) {
         // no results, return empty
-        return Response.ok().build();
+        return addContentDisposition(Response.ok(), contentDispositionHeaderValue).build();
       }
 
       ResultFormat preferredFormat = getPreferredResultFormat(resultFormat, msqControllerTask.getQuerySpec());
-      return Response.ok((StreamingOutput) outputStream -> resultPusher(
+      final Response.ResponseBuilder responseBuilder = Response.ok((StreamingOutput) outputStream -> resultPusher(
           queryId,
           signature,
           closer,
           results,
           new CountingOutputStream(outputStream),
           preferredFormat
-      )).build();
+      ));
+
+      return addContentDisposition(responseBuilder, contentDispositionHeaderValue).build();
     }
     catch (DruidException e) {
       return buildNonOkResponse(e);
@@ -587,7 +591,7 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
     if (resultFormatParam == null) {
       return QueryContexts.getAsEnum(
           RESULT_FORMAT,
-          msqSpec.getQuery().context().get(RESULT_FORMAT),
+          msqSpec.getContext().get(RESULT_FORMAT),
           ResultFormat.class,
           ResultFormat.DEFAULT_RESULT_FORMAT
       );

@@ -46,7 +46,7 @@ public class SketchResponseHandler implements HttpResponseHandler<BytesFullRespo
   }
 
   @Override
-  public ClientResponse<BytesFullResponseHolder> handleResponse(HttpResponse response, TrafficCop
+  public ClientResponse<BytesFullResponseHolder> handleResponse(HttpResponse response, HttpResponseHandler.TrafficCop
       trafficCop)
   {
     final BytesFullResponseHolder holder = new BytesFullResponseHolder(response);

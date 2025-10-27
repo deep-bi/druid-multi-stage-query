@@ -417,7 +417,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
     );
 
     assertExceptionMessage(
-        resource.doGetResults(ACCEPTED_SELECT_MSQ_QUERY, 0L, null, makeOkRequest()),
+        resource.doGetResults(ACCEPTED_SELECT_MSQ_QUERY, 0L, null, null, makeOkRequest()),
         StringUtils.format(
             "Query[%s] is currently in [%s] state. Please wait for it to complete.",
             ACCEPTED_SELECT_MSQ_QUERY,
@@ -451,7 +451,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
     );
 
     assertExceptionMessage(
-        resource.doGetResults(RUNNING_SELECT_MSQ_QUERY, 0L, null, makeOkRequest()),
+        resource.doGetResults(RUNNING_SELECT_MSQ_QUERY, 0L, null, null, makeOkRequest()),
         StringUtils.format(
             "Query[%s] is currently in [%s] state. Please wait for it to complete.",
             RUNNING_SELECT_MSQ_QUERY,
@@ -491,6 +491,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         FINISHED_SELECT_MSQ_QUERY,
         0L,
         ResultFormat.OBJECTLINES.name(),
+        null,
         makeOkRequest()
     );
     Assertions.assertEquals(Response.Status.OK.getStatusCode(), resultsResponse.getStatus());
@@ -511,6 +512,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
             FINISHED_SELECT_MSQ_QUERY,
             0L,
             ResultFormat.OBJECTLINES.name(),
+            null,
             makeOkRequest()
         )
     );
@@ -521,13 +523,14 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
             FINISHED_SELECT_MSQ_QUERY,
             null,
             ResultFormat.OBJECTLINES.name(),
+            null,
             makeOkRequest()
         )
     );
 
     Assertions.assertEquals(
         Response.Status.BAD_REQUEST.getStatusCode(),
-        resource.doGetResults(FINISHED_SELECT_MSQ_QUERY, -1L, null, makeOkRequest()).getStatus()
+        resource.doGetResults(FINISHED_SELECT_MSQ_QUERY, -1L, null, null, makeOkRequest()).getStatus()
     );
   }
 
@@ -540,7 +543,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         Response.Status.OK
     );
     assertExceptionMessage(
-        resource.doGetResults(ERRORED_SELECT_MSQ_QUERY, 0L, null, makeOkRequest()),
+        resource.doGetResults(ERRORED_SELECT_MSQ_QUERY, 0L, null, null, makeOkRequest()),
         StringUtils.format(
             "Query[%s] failed. Check the status api for more details.",
             ERRORED_SELECT_MSQ_QUERY
@@ -569,6 +572,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         resource.doGetResults(
             RUNNING_SELECT_MSQ_QUERY,
             1L,
+            null,
             null,
             makeExpectedReq(makeAuthResultForUser(SUPERUSER))
         ).getStatus()
@@ -599,6 +603,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
             RUNNING_SELECT_MSQ_QUERY,
             1L,
             null,
+            null,
             makeExpectedReq(differentUserAuthResult)
         ).getStatus()
     );
@@ -627,6 +632,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         resource.doGetResults(
             RUNNING_SELECT_MSQ_QUERY,
             1L,
+            null,
             null,
             makeExpectedReq(differentUserAuthResult)
         ).getStatus()
@@ -657,6 +663,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
             RUNNING_SELECT_MSQ_QUERY,
             1L,
             null,
+            null,
             makeExpectedReq(differentUserAuthResult)
         ).getStatus()
     );
@@ -685,6 +692,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         resource.doGetResults(
             RUNNING_SELECT_MSQ_QUERY,
             1L,
+            null,
             null,
             makeExpectedReq(differentUserAuthResult)
         ).getStatus()
@@ -717,7 +725,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
     );
     Assertions.assertEquals(
         Response.Status.NOT_FOUND.getStatusCode(),
-        resource.doGetResults(taskIdNotFound, null, null, makeOkRequest()).getStatus()
+        resource.doGetResults(taskIdNotFound, null, null, null, makeOkRequest()).getStatus()
     );
     Assertions.assertEquals(
         Response.Status.NOT_FOUND.getStatusCode(),

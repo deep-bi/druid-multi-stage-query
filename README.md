@@ -156,7 +156,7 @@ Package `org.apache.druid.msq.sql` contains code related to integration with Dru
 Main classes:
 
 - [SqlTaskResource](src/main/java/org/apache/druid/msq/sql/resources/SqlStatementResource.java) offers the endpoint
-  `/druid/v2/sql/task`, where SQL queries are executed as multi-stage query tasks.
+  `/druid/v2/sql/statements/`, where SQL queries are executed as multi-stage query tasks.
 - [MSQTaskSqlEngine](src/main/java/org/apache/druid/msq/sql/MSQTaskSqlEngine.java) is a SqlEngine implementation that
   executes SQL queries as multi-stage query tasks. It is injected into the SqlTaskResource.
 - 
@@ -167,7 +167,7 @@ Package `org.apache.druid.msq.nql` contains code related to launching native que
 Main classes:
 
 - [NativeTaskResource](src/main/java/org/apache/druid/msq/nql/resources/NativeStatementResource.java) offers the endpoint
-  `/druid/v2/sql/task`, where SQL queries are executed as multi-stage query tasks.
+  `/druid/v2/native/statements/`, where native queries are executed as multi-stage query tasks.
 - [MSQNativeTaskQueryMaker](src/main/java/org/apache/druid/msq/nql/MSQNativeTaskQueryMaker.java) Creates task from the query
   and sends it to the OverlordClient.
 

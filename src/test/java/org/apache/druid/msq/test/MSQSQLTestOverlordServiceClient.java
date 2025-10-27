@@ -63,7 +63,7 @@ public class MSQSQLTestOverlordServiceClient extends MSQTestOverlordServiceClien
           workerMemoryParameters,
           loadedSegmentMetadata,
           cTask.getTaskLockType(),
-          cTask.getQuerySpec().getQuery().context()
+          cTask.getQuerySpec().getContext()
       );
 
       inMemoryControllerTask.put(cTask.getId(), cTask);
@@ -96,7 +96,7 @@ public class MSQSQLTestOverlordServiceClient extends MSQTestOverlordServiceClien
       throw new ISE(e, "Unable to run");
     }
     finally {
-      if (controller != null && queryListener != null) {
+      if (queryListener != null && queryListener.reportMap != null) {
         reports.put(controller.queryId(), queryListener.getReportMap());
       }
     }

@@ -33,12 +33,15 @@ import org.apache.druid.indexing.common.TaskToolbox;
 import org.apache.druid.indexing.common.actions.TaskActionClient;
 import org.apache.druid.indexing.common.config.TaskConfig;
 import org.apache.druid.indexing.common.task.AbstractTask;
+import org.apache.druid.indexing.common.task.IndexTaskUtils;
 import org.apache.druid.indexing.common.task.Tasks;
+import org.apache.druid.java.util.emitter.service.ServiceMetricEvent;
 import org.apache.druid.msq.exec.Controller;
 import org.apache.druid.msq.exec.ControllerContext;
 import org.apache.druid.msq.exec.MSQTasks;
 import org.apache.druid.msq.exec.NativeControllerImpl;
 import org.apache.druid.msq.indexing.destination.DataSourceMSQDestination;
+import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
 import org.apache.druid.rpc.ServiceClientFactory;
 import org.apache.druid.rpc.StandardRetryPolicy;
@@ -57,6 +60,7 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
 
   public static final String TYPE = "native_query_controller";
   public static final String DUMMY_DATASOURCE_FOR_SELECT = "__query_select";
+  public static final String DUMMY_DATASOURCE_FOR_EXPORT = "__query_export";
 
   private final MSQSpec querySpec;
   private final RowSignature signature;
@@ -101,6 +105,8 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
 
     if (destination instanceof DataSourceMSQDestination) {
       return ((DataSourceMSQDestination) destination).getDataSource();
+    } else if (destination instanceof ExportMSQDestination) {
+      return DUMMY_DATASOURCE_FOR_EXPORT;
     } else {
       return DUMMY_DATASOURCE_FOR_SELECT;
     }
@@ -113,8 +119,14 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
         injector.getInstance(Key.get(ServiceClientFactory.class, EscalatedGlobal.class));
     final OverlordClient overlordClient = injector.getInstance(OverlordClient.class)
                                                   .withRetryPolicy(StandardRetryPolicy.unlimited());
+    ServiceMetricEvent.Builder metricBuilder = new ServiceMetricEvent.Builder();
+    IndexTaskUtils.setTaskDimensions(metricBuilder, this);
     final ControllerContext context = new IndexerControllerContext(
-        this,
+        null,
+        this.getDataSource(),
+        this.getQuerySpec().getContext(),
+        this.getContext(),
+        metricBuilder,
         toolbox,
         injector,
         clientFactory,
