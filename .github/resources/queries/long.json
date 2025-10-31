@@ -1,0 +1,251 @@
+{
+  "queryType": "groupBy",
+  "dataSource": {
+    "type": "join",
+    "left": {
+      "type": "join",
+      "left": {
+        "type": "join",
+        "left": {
+          "type": "table",
+          "name": "wikipedia"
+        },
+        "right": {
+          "type": "query",
+          "query": {
+            "queryType": "scan",
+            "dataSource": {
+              "type": "table",
+              "name": "wikipedia"
+            },
+            "intervals": {
+              "type": "intervals",
+              "intervals": [
+                "-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z"
+              ]
+            },
+            "resultFormat": "compactedList",
+            "columns": [
+              "page",
+              "user",
+              "deleted",
+              "countryName"
+            ],
+            "columnTypes": [
+              "STRING",
+              "STRING",
+              "LONG",
+              "STRING"
+            ],
+            "granularity": {
+              "type": "all"
+            },
+            "legacy": false
+          }
+        },
+        "rightPrefix": "j0.",
+        "condition": "(\"page\" == \"j0.page\")",
+        "joinType": "INNER"
+      },
+      "right": {
+        "type": "query",
+        "query": {
+          "queryType": "scan",
+          "dataSource": {
+            "type": "table",
+            "name": "wikipedia"
+          },
+          "intervals": {
+            "type": "intervals",
+            "intervals": [
+              "-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z"
+            ]
+          },
+          "resultFormat": "compactedList",
+          "columns": [
+            "page",
+            "added",
+            "user"
+          ],
+          "columnTypes": [
+            "STRING",
+            "LONG",
+            "STRING"
+          ],
+          "granularity": {
+            "type": "all"
+          },
+          "legacy": false
+        }
+      },
+      "rightPrefix": "_j0.",
+      "condition": "(\"j0.user\" == \"_j0.user\")",
+      "joinType": "INNER"
+    },
+    "right": {
+      "type": "query",
+      "query": {
+        "queryType": "scan",
+        "dataSource": {
+          "type": "table",
+          "name": "wikipedia"
+        },
+        "intervals": {
+          "type": "intervals",
+          "intervals": [
+            "-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z"
+          ]
+        },
+        "resultFormat": "compactedList",
+        "columns": [
+          "page"
+        ],
+        "columnTypes": [
+          "STRING"
+        ],
+        "granularity": {
+          "type": "all"
+        },
+        "legacy": false
+      }
+    },
+    "rightPrefix": "__j0.",
+    "condition": "(\"_j0.page\" == \"__j0.page\")",
+    "joinType": "INNER"
+  },
+  "intervals": {
+    "type": "intervals",
+    "intervals": [
+      "2005-01-01T00:00:00.000Z/2025-01-01T00:00:00.001Z"
+    ]
+  },
+  "virtualColumns": [
+    {
+      "type": "expression",
+      "name": "v0",
+      "expression": "((\"added\" + \"j0.deleted\") + \"_j0.added\")",
+      "outputType": "LONG"
+    },
+    {
+      "type": "expression",
+      "name": "v1",
+      "expression": "abs(((\"added\" - \"j0.deleted\") + \"_j0.added\"))",
+      "outputType": "LONG"
+    },
+    {
+      "type": "expression",
+      "name": "v2",
+      "expression": "pow(((\"added\" + \"j0.deleted\") + \"_j0.added\"),0.5)",
+      "outputType": "DOUBLE"
+    },
+    {
+      "type": "expression",
+      "name": "v3",
+      "expression": "pow(abs((\"added\" - \"j0.deleted\")),2)",
+      "outputType": "DOUBLE"
+    },
+    {
+      "type": "expression",
+      "name": "v4",
+      "expression": "log10(abs(((\"added\" + \"j0.deleted\") + \"_j0.added\")))",
+      "outputType": "DOUBLE"
+    }
+  ],
+  "granularity": {
+    "type": "all"
+  },
+  "dimensions": [
+    {
+      "type": "default",
+      "dimension": "user",
+      "outputName": "d0",
+      "outputType": "STRING"
+    },
+    {
+      "type": "default",
+      "dimension": "j0.countryName",
+      "outputName": "d1",
+      "outputType": "STRING"
+    }
+  ],
+  "aggregations": [
+    {
+      "type": "longSum",
+      "name": "a0",
+      "fieldName": "v0"
+    },
+    {
+      "type": "count",
+      "name": "a1"
+    },
+    {
+      "type": "longSum",
+      "name": "a2",
+      "fieldName": "v1"
+    },
+    {
+      "type": "doubleSum",
+      "name": "a3:sum",
+      "fieldName": "v2"
+    },
+    {
+      "type": "filtered",
+      "aggregator": {
+        "type": "count",
+        "name": "a3:count"
+      },
+      "filter": {
+        "type": "not",
+        "field": {
+          "type": "null",
+          "column": "v2"
+        }
+      },
+      "name": "a3:count"
+    },
+    {
+      "type": "doubleSum",
+      "name": "a4",
+      "fieldName": "v3"
+    },
+    {
+      "type": "doubleSum",
+      "name": "a5",
+      "fieldName": "v4"
+    }
+  ],
+  "postAggregations": [
+    {
+      "type": "arithmetic",
+      "name": "a3",
+      "fn": "quotient",
+      "fields": [
+        {
+          "type": "fieldAccess",
+          "fieldName": "a3:sum"
+        },
+        {
+          "type": "fieldAccess",
+          "fieldName": "a3:count"
+        }
+      ]
+    }
+  ],
+  "limitSpec": {
+    "type": "default",
+    "columns": [
+      {
+        "dimension": "a3",
+        "direction": "descending",
+        "dimensionOrder": {
+          "type": "numeric"
+        }
+      }
+    ],
+    "limit": 1001
+  },
+  "context": {
+    "queryId": "to-cancel",
+    "executionMode": "async"
+  }
+}

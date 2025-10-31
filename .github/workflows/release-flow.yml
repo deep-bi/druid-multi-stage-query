@@ -3,60 +3,56 @@ on:
   workflow_dispatch:
     inputs:
       upstream_ref:
-        description: "Druid ref for web-console (e.g. 33.0.0 or druid-33.0.0)"
+        description: "Druid ref (e.g. 33.0.0 or druid-33.0.0)"
         required: true
-      publish:
-        description: "Publish as real release (not draft)"
-        type: boolean
-        default: false
+
 permissions:
   contents: write
 
+env:
+  JAVA_VERSION: "11"
+
 jobs:
-  release:
+  build-and-test:
     runs-on: ubuntu-latest
+    outputs:
+      druid_version: ${{ steps.norm.outputs.druid_version }}
+      druid_tag:     ${{ steps.norm.outputs.druid_tag }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Validate ref for mode
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Normalize upstream ref
+        id: norm
+        shell: bash
         run: |
           set -euo pipefail
-          echo "REF: type=$GITHUB_REF_TYPE name=$GITHUB_REF_NAME publish=${{ inputs.publish }}"
-          if [ "${{ inputs.publish }}" = "true" ]; then
-            if [[ "$GITHUB_REF_TYPE" = "branch" && "$GITHUB_REF_NAME" =~ ^release/ ]]; then
-              exit 0
-            else
-              echo "::error::Publishing requires run from a release/* branch"; exit 1
-            fi
+          REF="${{ inputs.upstream_ref }}"
+          if [[ "$REF" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            VER="$REF"; TAG="druid-$REF"
           else
-            if [[ "$GITHUB_REF_TYPE" = "branch" && "$GITHUB_REF_NAME" =~ -rc$ ]]; then
-              exit 0
-            else
-              echo "::error::Draft mode must run from a *-rc branch"; exit 1
-            fi
+            VER="${REF#druid-}"; TAG="$REF"
           fi
+          echo "druid_version=$VER" >> "$GITHUB_OUTPUT"
+          echo "druid_tag=$TAG"     >> "$GITHUB_OUTPUT"
 
-      - name: Setup JDK 11
-        uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: "11" }
-
-      - name: Build MSQ + tests
-        run: mvn clean test -B
+      - name: Build MSQ + unit tests
+        run: mvn -B -ntp clean test
 
       - name: Package MSQ jars
         run: |
+          set -euo pipefail
+          VER="${{ steps.norm.outputs.druid_version }}"
           mkdir -p dist
           mvn -q -DskipTests package
-          find . -path '*/target/*.jar' -not -path './external-druid/*' -exec cp -n {} dist/ \; || true
-
-      - name: Normalize upstream ref
-        id: ref
-        run: |
-          REF="${{ inputs.upstream_ref }}"
-          [[ "$REF" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]] && REF="druid-$REF"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          find . -type f -path "*/target/druid-multi-stage-query-${VER}.jar" -not -path "./external-druid/*" -exec cp -n {} dist \; || true
+          ls -l dist || true
 
       - name: Sparse checkout apache/druid@ref
         run: |
@@ -71,7 +67,7 @@ jobs:
             echo "codestyle/"
             echo "docs/"
           } > external-druid/.git/info/sparse-checkout
-          git -C external-druid fetch --depth 1 origin "${{ steps.ref.outputs.ref }}" || git -C external-druid fetch --depth 1 origin "refs/tags/${{ steps.ref.outputs.ref }}"
+          git -C external-druid fetch --depth 1 origin "${{ steps.norm.outputs.druid_tag }}" || git -C external-druid fetch --depth 1 origin "refs/tags/${{ steps.norm.outputs.druid_tag }}"
           git -C external-druid checkout --detach FETCH_HEAD
           [ -d external-druid/codestyle ] && mv external-druid/codestyle external-druid/web-console/
           [ -d external-druid/licenses ] && mv external-druid/licenses external-druid/web-console/
@@ -94,61 +90,69 @@ jobs:
           fi
           echo "Patch applied cleanly."
 
-      - name: Setup Node for web-console
+      - name: Setup Node 20
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "20"
 
       - name: Web-console unit tests
+        working-directory: external-druid/web-console
         run: |
           set -e
-          cd external-druid/web-console
           npm ci --no-audit --no-fund
           script/create-sql-docs.mjs
           npx jest --ci
 
-      - name: Build web-console jar
+      - name: Package MSQ jars
+        working-directory: external-druid/web-console
         run: |
-          set -e
-          ( cd external-druid/web-console && mvn -q -Dpmd.skip=true -DskipTests clean package )
-          cp external-druid/web-console/target/*.jar dist/
+          VER="${{ steps.norm.outputs.druid_version }}"
+          mvn -q -DskipTests -Dpmd.skip=true clean package
+          cp external-druid/web-console/target/web-console-${VER}.jar dist
+          ls -l dist
 
-      - name: Compute release metadata
-        id: relmeta
+      - name: Create RC draft release (unique tag per run) and upload jars
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER="${{ steps.norm.outputs.druid_version }}"
+          TMP_TAG="staging-${VER}-${{ github.run_id }}"
+          TITLE="RC ${VER} (run ${{ github.run_number }})"
+          gh release create "$TMP_TAG" --draft --title "$TITLE" --target "${GITHUB_SHA}" --notes "Automated RC draft"
+          gh release upload "$TMP_TAG" dist/web-console-${VER}.jar dist/druid-multi-stage-query-${VER}.jar --clobber  
+
+      - name: Install Chrome for IT
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Provision Druid, run integration tests
+        id: it
         shell: bash
         run: |
-          VER="${{ inputs.upstream_ref }}"
-          if [ "${{ inputs.publish }}" = "true" ]; then
-            echo "tag=release-$VER" >> $GITHUB_OUTPUT
-            echo "name=Release $VER" >> $GITHUB_OUTPUT
-            echo "draft=false" >> $GITHUB_OUTPUT
-          else
-            echo "tag=draft-${{ inputs.upstream_ref }}-${{ github.run_number }}" >> $GITHUB_OUTPUT
-            echo "name=Draft Release $VER (run ${{ github.run_number }})" >> $GITHUB_OUTPUT
-            echo "draft=true" >> $GITHUB_OUTPUT
-          fi
+          set -euo pipefail
+          chmod +x .github/tools/provision-run-it.sh
+          .github/tools/provision-run-it.sh \
+            "${{ steps.norm.outputs.druid_version }}" \
+            "$PWD/dist"
 
-      - name: Create GitHub release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.relmeta.outputs.tag }}
-          name: ${{ steps.relmeta.outputs.name }}
-          draft: ${{ steps.relmeta.outputs.draft }}
-          target_commitish: ${{ github.sha }}
+      - name: Create release branch, undraft, retag, clean tmp tag
+        if: success()
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Zip artifacts
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          (cd dist && zip -r ../artifacts.zip .)
-
-      - name: Upload artifacts
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts.zip
-          asset_name: artifacts-${{ inputs.upstream_ref }}.zip
-          asset_content_type: application/zip
+          set -euo pipefail
+          VER="${{ steps.norm.outputs.druid_version }}"
+          TMP_TAG="staging-${VER}-${{ github.run_id }}"
+          FINAL_TAG="release-${VER}"
+          
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git fetch origin
+          git push origin "HEAD:refs/heads/release/${VER}"
+          
+          gh release edit "$TMP_TAG" --tag "$FINAL_TAG" --draft=false --title "Release ${VER}"
+          
+          git push origin ":refs/tags/${TMP_TAG}" || true
