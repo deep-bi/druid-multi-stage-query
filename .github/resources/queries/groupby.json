@@ -1,0 +1,18 @@
+{
+  "queryType": "groupBy",
+  "dataSource": "wikipedia",
+  "granularity": "all",
+  "dimensions": ["countryName"],
+  "aggregations": [
+    { "type": "count", "name": "rows" }
+  ],
+  "intervals": ["2015-09-12/2015-09-13"],
+  "limitSpec": {
+    "type": "default",
+    "limit": 10
+  },
+  "context": {
+    "queryId": "example-groupby",
+    "executionMode":"async"
+  }
+}

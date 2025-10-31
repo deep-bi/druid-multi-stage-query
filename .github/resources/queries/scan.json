@@ -1,0 +1,13 @@
+{
+  "queryType": "scan",
+  "dataSource": "wikipedia",
+  "resultFormat": "list",
+  "columns": ["__time", "user", "page", "added", "deleted"],
+  "intervals": ["2015-09-12/2015-09-13"],
+  "limit": 10,
+  "context": {
+    "queryId": "example-scan",
+    "executionMode": "async",
+    "scanSignature": "[{\"name\":\"__time\",\"type\":\"LONG\"},{\"name\":\"user\",\"type\":\"STRING\"},{\"name\":\"page\",\"type\":\"STRING\"},{\"name\":\"added\",\"type\":\"LONG\"},{\"name\":\"deleted\",\"type\":\"LONG\"}]"
+  }
+}
