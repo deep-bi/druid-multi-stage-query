@@ -1,4 +1,4 @@
-package e2e;
+package integration;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
@@ -29,7 +29,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
-class DruidMsqResultsE2ETest
+class DruidMsqResultsIT
 {
 
   private static WebDriver driver;
