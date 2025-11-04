@@ -108,8 +108,8 @@ jobs:
         run: |
           VER="${{ steps.norm.outputs.druid_version }}"
           mvn -q -DskipTests -Dpmd.skip=true clean package
-          cp external-druid/web-console/target/web-console-${VER}.jar dist
-          ls -l dist
+          cp target/web-console-${VER}.jar "$GITHUB_WORKSPACE/dist/"
+          ls -l "$GITHUB_WORKSPACE/dist/"
 
       - name: Create RC draft release (unique tag per run) and upload jars
         env:
