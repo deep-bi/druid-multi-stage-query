@@ -42,7 +42,7 @@ jobs:
           echo "druid_version=$VER" >> "$GITHUB_OUTPUT"
           echo "druid_tag=$TAG"     >> "$GITHUB_OUTPUT"
 
-      - name: Build MSQ + unit tests
+      - name: Run MSQ unit tests
         run: mvn -B -ntp clean test
 
       - name: Package MSQ jars
@@ -103,7 +103,7 @@ jobs:
           script/create-sql-docs.mjs
           npx jest --ci
 
-      - name: Package MSQ jars
+      - name: Package Web-Console jars
         working-directory: external-druid/web-console
         run: |
           VER="${{ steps.norm.outputs.druid_version }}"
