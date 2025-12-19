@@ -79,6 +79,12 @@ public class MSQCalciteSelectJoinQueryTest
     {
       return JoinAlgorithm.SORT_MERGE;
     }
+
+    @Override
+    public void testJoinOnRestrictedBroadcast(Map<String, Object> queryContext)
+    {
+      // Skip testing sort-merge join for restricted broadcast, this test is not applicable.
+    }
   }
 
   @SqlTestFrameworkConfig.ComponentSupplier(StandardMSQComponentSupplier.class)
@@ -96,7 +102,7 @@ public class MSQCalciteSelectJoinQueryTest
       return new QueryTestBuilder(new CalciteTestConfig(defaultCtx, true))
           .addCustomRunner(
               new ExtractResultsFactory(
-                  () -> (MSQSQLTestOverlordServiceClient) ((MSQTaskSqlEngine) queryFramework().engine()).overlordClient()))
+                  () -> (MSQTestOverlordServiceClient) ((MSQTaskSqlEngine) queryFramework().engine()).overlordClient()))
           .skipVectorize(true);
     }
   }
