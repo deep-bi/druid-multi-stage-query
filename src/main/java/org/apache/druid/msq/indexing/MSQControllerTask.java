@@ -55,6 +55,8 @@ import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
 import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
 import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
+import org.apache.druid.msq.indexing.error.CancellationReason;
+import org.apache.druid.msq.sql.MSQTaskQueryKitSpecFactory;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
@@ -79,14 +81,14 @@ import java.util.Set;
 
 @JsonTypeName(MSQControllerTask.TYPE)
 public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
-    PendingSegmentAllocatingTask, IsMSQTask
+    PendingSegmentAllocatingTask, MsqTask
 {
   public static final String TYPE = "query_controller";
   public static final String DUMMY_DATASOURCE_FOR_SELECT = "__query_select";
   public static final String DUMMY_DATASOURCE_FOR_EXPORT = "__query_export";
   private static final Logger log = new Logger(MSQControllerTask.class);
 
-  private final MSQSpec querySpec;
+  private final LegacyMSQSpec querySpec;
 
   /**
    * Enables users, and the web console, to see the original SQL query (if any). Not used by anything else in Druid.
@@ -124,7 +126,7 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
   @JsonCreator
   public MSQControllerTask(
       @JsonProperty("id") @Nullable String id,
-      @JsonProperty("spec") MSQSpec querySpec,
+      @JsonProperty("spec") LegacyMSQSpec querySpec,
       @JsonProperty("sqlQuery") @Nullable String sqlQuery,
       @JsonProperty("sqlQueryContext") @Nullable Map<String, Object> sqlQueryContext,
       @JsonProperty("sqlResultsContext") @Nullable SqlResults.Context sqlResultsContext,
@@ -153,7 +155,7 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
 
   public MSQControllerTask(
       @Nullable String id,
-      MSQSpec querySpec,
+      LegacyMSQSpec querySpec,
       @Nullable String sqlQuery,
       @Nullable Map<String, Object> sqlQueryContext,
       @Nullable SqlResults.Context sqlResultsContext,
@@ -189,7 +191,7 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
   }
 
   @JsonProperty("spec")
-  public MSQSpec getQuerySpec()
+  public LegacyMSQSpec getQuerySpec()
   {
     return querySpec;
   }
@@ -273,11 +275,7 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
     ServiceMetricEvent.Builder metricBuilder = new ServiceMetricEvent.Builder();
     IndexTaskUtils.setTaskDimensions(metricBuilder, this);
     final ControllerContext context = new IndexerControllerContext(
-        this.getTaskLockType(),
-        this.getDataSource(),
-        this.getQuerySpec().getContext(),
-        this.getContext(),
-        metricBuilder,
+        this,
         toolbox,
         injector,
         clientFactory,
@@ -285,10 +283,10 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
     );
 
     controller = new ControllerImpl(
-        this.getId(),
         querySpec,
         new ResultsContext(getSqlTypeNames(), getSqlResultsContext()),
-        context
+        context,
+        injector.getInstance(MSQTaskQueryKitSpecFactory.class)
     );
 
     final TaskReportQueryListener queryListener = new TaskReportQueryListener(
@@ -308,7 +306,7 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
   public void stopGracefully(final TaskConfig taskConfig)
   {
     if (controller != null) {
-      controller.stop();
+      controller.stop(CancellationReason.TASK_SHUTDOWN);
     }
   }
 
@@ -338,7 +336,7 @@ public class MSQControllerTask extends AbstractTask implements ClientTaskQuery,
     }
   }
 
-  private static String getDataSourceForTaskMetadata(final MSQSpec querySpec)
+  private static String getDataSourceForTaskMetadata(final LegacyMSQSpec querySpec)
   {
     final MSQDestination destination = querySpec.getDestination();
 

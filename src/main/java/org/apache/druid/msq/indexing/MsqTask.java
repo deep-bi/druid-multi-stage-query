@@ -23,7 +23,7 @@ import org.apache.druid.indexing.common.TaskLockType;
 
 import javax.annotation.Nullable;
 
-public interface IsMSQTask
+public interface MsqTask
 {
 
   MSQSpec getQuerySpec();

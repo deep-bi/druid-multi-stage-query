@@ -40,6 +40,9 @@ import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.java.util.common.granularity.Granularity;
 import org.apache.druid.java.util.common.guava.Sequences;
 import org.apache.druid.msq.exec.MSQTasks;
+import org.apache.druid.msq.exec.QueryKitSpecFactory;
+import org.apache.druid.msq.exec.ResultsContext;
+import org.apache.druid.msq.indexing.LegacyMSQSpec;
 import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.indexing.MSQTuningConfig;
@@ -95,6 +98,7 @@ public class MSQTaskQueryMaker implements QueryMaker
   private final ObjectMapper jsonMapper;
   private final List<Entry<Integer, String>> fieldMapping;
   private final MSQTerminalStageSpecFactory terminalStageSpecFactory;
+  private final QueryKitSpecFactory queryKitSpecFactory;
 
   MSQTaskQueryMaker(
       @Nullable final IngestDestination targetDataSource,
@@ -102,7 +106,8 @@ public class MSQTaskQueryMaker implements QueryMaker
       final PlannerContext plannerContext,
       final ObjectMapper jsonMapper,
       final List<Entry<Integer, String>> fieldMapping,
-      final MSQTerminalStageSpecFactory terminalStageSpecFactory
+      final MSQTerminalStageSpecFactory terminalStageSpecFactory,
+      final QueryKitSpecFactory queryKitSpecFactory
   )
   {
     this.targetDataSource = targetDataSource;
@@ -111,6 +116,7 @@ public class MSQTaskQueryMaker implements QueryMaker
     this.jsonMapper = Preconditions.checkNotNull(jsonMapper, "jsonMapper");
     this.fieldMapping = Preconditions.checkNotNull(fieldMapping, "fieldMapping");
     this.terminalStageSpecFactory = terminalStageSpecFactory;
+    this.queryKitSpecFactory = queryKitSpecFactory;
   }
 
   @Override
@@ -119,7 +125,7 @@ public class MSQTaskQueryMaker implements QueryMaker
     Hook.QUERY_PLAN.run(druidQuery.getQuery());
     plannerContext.dispatchHook(DruidHook.NATIVE_PLAN, druidQuery.getQuery());
 
-    String taskId = MSQTasks.controllerTaskId(plannerContext.getSqlQueryId());
+    final String taskId = MSQTasks.controllerTaskId(plannerContext.getSqlQueryId());
 
     final Map<String, Object> taskContext = new HashMap<>();
     taskContext.put(LookupLoadingSpec.CTX_LOOKUP_LOADING_MODE, plannerContext.getLookupLoadingSpec().getMode());
@@ -129,13 +135,28 @@ public class MSQTaskQueryMaker implements QueryMaker
 
     final List<Pair<SqlTypeName, ColumnType>> typeList = getTypes(druidQuery, fieldMapping, plannerContext);
 
+    final ResultsContext resultsContext = new ResultsContext(
+        typeList.stream().map(typeInfo -> typeInfo.lhs).collect(Collectors.toList()),
+        SqlResults.Context.fromPlannerContext(plannerContext)
+    );
+    ColumnMappings columnMappings = QueryUtils.buildColumnMappings(fieldMapping, druidQuery.getOutputRowSignature());
+
+    final LegacyMSQSpec querySpec = makeLegacyMSQSpec(
+        targetDataSource,
+        druidQuery,
+        druidQuery.getQuery().context(),
+        columnMappings,
+        plannerContext,
+        terminalStageSpecFactory
+    );
+
     final MSQControllerTask controllerTask = new MSQControllerTask(
         taskId,
-        makeQuerySpec(targetDataSource, druidQuery, fieldMapping, plannerContext, terminalStageSpecFactory),
+        querySpec,
         MSQTaskQueryMakerUtils.maskSensitiveJsonKeys(plannerContext.getSql()),
         plannerContext.queryContextMap(),
-        SqlResults.Context.fromPlannerContext(plannerContext),
-        typeList.stream().map(typeInfo -> typeInfo.lhs).collect(Collectors.toList()),
+        resultsContext.getSqlResultsContext(),
+        resultsContext.getSqlTypeNames(),
         typeList.stream().map(typeInfo -> typeInfo.rhs).collect(Collectors.toList()),
         taskContext
     );
@@ -144,10 +165,11 @@ public class MSQTaskQueryMaker implements QueryMaker
     return QueryResponse.withEmptyContext(Sequences.simple(Collections.singletonList(new Object[]{taskId})));
   }
 
-  public static MSQSpec makeQuerySpec(
+  public static LegacyMSQSpec makeLegacyMSQSpec(
       @Nullable final IngestDestination targetDataSource,
       final DruidQuery druidQuery,
-      final List<Entry<Integer, String>> fieldMapping,
+      final QueryContext queryContext,
+      ColumnMappings columnMappings,
       final PlannerContext plannerContext,
       final MSQTerminalStageSpecFactory terminalStageSpecFactory
   )

@@ -39,7 +39,7 @@ import org.apache.druid.java.util.common.guava.Yielder;
 import org.apache.druid.java.util.common.guava.Yielders;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
-import org.apache.druid.msq.indexing.IsMSQTask;
+import org.apache.druid.msq.indexing.MsqTask;
 import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQSelectDestination;
@@ -81,7 +81,7 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-public abstract class AbstractStatementResource<ResultType extends StatementResult, TaskType extends AbstractTask & IsMSQTask>
+public abstract class AbstractStatementResource<ResultType extends StatementResult, TaskType extends AbstractTask & MsqTask>
 {
   public static final String CONTENT_DISPOSITION_RESPONSE_HEADER = "Content-Disposition";
   protected static final Pattern FILENAME_PATTERN = Pattern.compile("^[^/:*?><\\\\\"|\0\n\r]*$");

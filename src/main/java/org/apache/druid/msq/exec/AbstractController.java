@@ -75,7 +75,7 @@ import org.apache.druid.msq.counters.CounterSnapshots;
 import org.apache.druid.msq.counters.CounterSnapshotsTree;
 import org.apache.druid.msq.indexing.InputChannelFactory;
 import org.apache.druid.msq.indexing.InputChannelsImpl;
-import org.apache.druid.msq.indexing.IsMSQTask;
+import org.apache.druid.msq.indexing.MsqTask;
 import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.indexing.MSQWorkerTaskLauncher;
@@ -184,7 +184,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.StreamSupport;
 
-public abstract class AbstractController<TaskType extends AbstractTask & IsMSQTask> implements Controller<TaskType>
+public abstract class AbstractController<TaskType extends AbstractTask & MsqTask> implements Controller<TaskType>
 {
 
   protected static final Logger log = new Logger(AbstractController.class);

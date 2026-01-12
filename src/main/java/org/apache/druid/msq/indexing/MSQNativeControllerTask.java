@@ -55,7 +55,7 @@ import java.util.Map;
 import java.util.Set;
 
 @JsonTypeName(MSQNativeControllerTask.TYPE)
-public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQuery, IsMSQTask
+public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQuery, MsqTask
 {
 
   public static final String TYPE = "native_query_controller";
