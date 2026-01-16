@@ -48,11 +48,11 @@ import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.java.util.common.granularity.GranularityType;
 import org.apache.druid.msq.indexing.error.TooManySegmentsInTimeChunkFault;
 import org.apache.druid.msq.indexing.report.MSQSegmentReport;
-import org.apache.druid.msq.sql.MSQTaskQueryMaker;
 import org.apache.druid.msq.test.CounterSnapshotMatcher;
 import org.apache.druid.msq.test.MSQTestBase;
 import org.apache.druid.msq.test.MSQTestTaskActionClient;
 import org.apache.druid.msq.util.MultiStageQueryContext;
+import org.apache.druid.msq.util.TaskQueryMakerUtil;
 import org.apache.druid.query.DruidMetrics;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.aggregation.AggregatorFactory;
@@ -715,7 +715,7 @@ public class MSQReplaceTest extends MSQTestBase
   public void testReplaceOnRestricted(String contextName, Map<String, Object> context)
   {
     // Set expected results based on query's end user
-    boolean isSuperUser = context.get(MSQTaskQueryMaker.USER_KEY).equals(CalciteTests.TEST_SUPERUSER_NAME);
+    boolean isSuperUser = context.get(TaskQueryMakerUtil.USER_KEY).equals(CalciteTests.TEST_SUPERUSER_NAME);
     ImmutableSet<Interval> expectedTombstoneIntervals = isSuperUser
                                                         ? ImmutableSet.of()
                                                         : ImmutableSet.of(
@@ -2746,10 +2746,14 @@ public class MSQReplaceTest extends MSQTestBase
                      .setExpectedResultRows(ImmutableList.of(new Object[]{946771200000L, 2.0f}))
                      .setExpectedMetricDimensions(
                          Map.of(
-                             DruidMetrics.DATASOURCE, "foo",
-                             DruidMetrics.INTERVAL, List.of("2000-01-02T00:00:00.000Z/2000-01-03T00:00:00.000Z"),
-                             DruidMetrics.DURATION, Duration.standardDays(1),
-                             DruidMetrics.SUCCESS, true
+                             DruidMetrics.DATASOURCE,
+                             "foo",
+                             DruidMetrics.INTERVAL,
+                             List.of("2000-01-02T00:00:00.000Z/2000-01-03T00:00:00.000Z"),
+                             DruidMetrics.DURATION,
+                             Duration.standardDays(1),
+                             DruidMetrics.SUCCESS,
+                             true
                              )
                      )
                      .verifyResults();

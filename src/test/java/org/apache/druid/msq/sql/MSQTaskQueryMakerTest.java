@@ -52,8 +52,8 @@ import org.apache.druid.msq.indexing.error.MSQErrorReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.querykit.DataSegmentProvider;
+import org.apache.druid.msq.test.MSQSQLTestOverlordServiceClient;
 import org.apache.druid.msq.test.MSQTestBase;
-import org.apache.druid.msq.test.MSQTestOverlordServiceClient;
 import org.apache.druid.msq.test.MSQTestTaskActionClient;
 import org.apache.druid.query.DruidProcessingConfig;
 import org.apache.druid.query.Druids;
@@ -223,7 +223,7 @@ public class MSQTaskQueryMakerTest
     );
     Injector injector = Guice.createInjector(defaultModule, BoundFieldModule.of(this));
     DruidSecondaryModule.setupJackson(injector, objectMapper);
-    fakeOverlordClient = new MSQTestOverlordServiceClient(
+    fakeOverlordClient = new MSQSQLTestOverlordServiceClient(
         objectMapper,
         injector,
         new MSQTestTaskActionClient(objectMapper, injector),

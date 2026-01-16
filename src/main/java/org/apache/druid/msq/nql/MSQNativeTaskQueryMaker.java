@@ -23,10 +23,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
 import org.apache.druid.common.guava.FutureUtils;
 import org.apache.druid.error.InvalidInput;
+import org.apache.druid.frame.FrameType;
+import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.guava.Sequences;
 import org.apache.druid.msq.exec.MSQTasks;
+import org.apache.druid.msq.indexing.LegacyMSQSpec;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
-import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.indexing.MSQTuningConfig;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
 import org.apache.druid.msq.sql.MSQMode;
@@ -39,11 +41,9 @@ import org.apache.druid.rpc.indexing.OverlordClient;
 import org.apache.druid.segment.IndexSpec;
 import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.server.QueryResponse;
+import org.apache.druid.server.security.AuthenticationResult;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
-import org.apache.druid.sql.destination.ExportDestination;
-import org.apache.druid.sql.destination.IngestDestination;
 
-import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -51,7 +51,6 @@ import java.util.Map;
 public class MSQNativeTaskQueryMaker
 {
 
-  private final IngestDestination targetDataSource;
   private final OverlordClient overlordClient;
   private final ObjectMapper jsonMapper;
   private final ColumnMappings columnMappings;
@@ -59,14 +58,12 @@ public class MSQNativeTaskQueryMaker
 
 
   public MSQNativeTaskQueryMaker(
-      @Nullable final IngestDestination targetDataSource,
       final OverlordClient overlordClient,
       final ObjectMapper jsonMapper,
       final ColumnMappings columnMappings,
       final RowSignature signature
   )
   {
-    this.targetDataSource = targetDataSource;
     this.overlordClient = Preconditions.checkNotNull(overlordClient, "indexingServiceClient");
     this.jsonMapper = Preconditions.checkNotNull(jsonMapper, "jsonMapper");
     this.columnMappings = columnMappings;
@@ -74,17 +71,13 @@ public class MSQNativeTaskQueryMaker
   }
 
 
-  public QueryResponse<Object[]> runNativeQuery(final Query<?> baseQuery)
+  public QueryResponse<Object[]> runNativeQuery(
+      final Query<?> baseQuery,
+      final AuthenticationResult authenticationResult
+  )
   {
     String taskId = MSQTasks.controllerTaskId(baseQuery.getId());
     final QueryContext queryContext = baseQuery.context();
-    final Map<String, Object> nativeQueryContext = new HashMap<>(queryContext.asMap());
-
-    final String msqMode = MultiStageQueryContext.getMSQMode(queryContext);
-    if (msqMode != null) {
-      MSQMode.populateDefaultQueryContext(msqMode, nativeQueryContext);
-    }
-
     final int maxNumTasks = MultiStageQueryContext.getMaxNumTasks(queryContext);
 
     if (maxNumTasks < 2) {
@@ -93,19 +86,43 @@ public class MSQNativeTaskQueryMaker
           maxNumTasks
       );
     }
+
     final int maxNumWorkers = maxNumTasks - 1;
     final int rowsPerSegment = MultiStageQueryContext.getRowsPerSegment(queryContext);
     final int maxRowsInMemory = MultiStageQueryContext.getRowsInMemory(queryContext);
     final IndexSpec indexSpec = MultiStageQueryContext.getIndexSpec(queryContext, jsonMapper);
+    final MSQDestination destination = TaskQueryMakerUtil.selectDestination(queryContext); // no export or table destination supported
+
+    final Map<String, Object> nativeQueryContextOverrides = buildOverrideContext(queryContext, authenticationResult);
+
+    final LegacyMSQSpec querySpec =
+        LegacyMSQSpec.builder()
+                     .query(baseQuery)
+                     .queryContext(queryContext.override(nativeQueryContextOverrides))
+                     .columnMappings(columnMappings)
+                     .destination(destination)
+                     .assignmentStrategy(MultiStageQueryContext.getAssignmentStrategy(queryContext))
+                     .tuningConfig(new MSQTuningConfig(maxNumWorkers, maxRowsInMemory, rowsPerSegment, null, indexSpec))
+                     .build();
+
+    final MSQNativeControllerTask controllerTask = new MSQNativeControllerTask(
+        taskId,
+        querySpec,
+        null,
+        signature
+    );
+    FutureUtils.getUnchecked(overlordClient.runTask(taskId, controllerTask), true);
+    return QueryResponse.withEmptyContext(Sequences.simple(Collections.singletonList(new Object[]{taskId})));
+  }
+
+  private static Map<String, Object> buildOverrideContext(
+      final QueryContext queryContext,
+      final AuthenticationResult authenticationResult
+  )
+  {
     final boolean finalizeAggregations = MultiStageQueryContext.isFinalizeAggregations(queryContext);
 
-    final MSQDestination destination;
 
-    if (targetDataSource instanceof ExportDestination) {
-      destination = TaskQueryMakerUtil.buildExportDestination((ExportDestination) targetDataSource, queryContext);
-    } else {
-      destination = TaskQueryMakerUtil.selectDestination(queryContext);
-    }
     final Map<String, Object> nativeQueryContextOverrides = new HashMap<>();
 
     // Add appropriate finalization to native query context.
@@ -114,22 +131,25 @@ public class MSQNativeTaskQueryMaker
     // This flag is to ensure backward compatibility, as brokers are upgraded after indexers/middlemanagers.
     nativeQueryContextOverrides.put(MultiStageQueryContext.WINDOW_FUNCTION_OPERATOR_TRANSFORMATION, true);
 
-    final MSQSpec querySpec =
-        MSQSpec.builder()
-               .query(baseQuery.withOverriddenContext(nativeQueryContextOverrides))
-               .columnMappings(columnMappings)
-               .destination(destination)
-               .assignmentStrategy(MultiStageQueryContext.getAssignmentStrategy(queryContext))
-               .tuningConfig(new MSQTuningConfig(maxNumWorkers, maxRowsInMemory, rowsPerSegment, null, indexSpec))
-               .build();
+    nativeQueryContextOverrides.putAll(queryContext.asMap());
 
-    final MSQNativeControllerTask controllerTask = new MSQNativeControllerTask(
-        taskId,
-        querySpec.withOverriddenContext(nativeQueryContext),
-        null,
-        signature
+    nativeQueryContextOverrides.put(TaskQueryMakerUtil.USER_KEY, authenticationResult.getIdentity());
+
+    final String msqMode = MultiStageQueryContext.getMSQMode(queryContext);
+    if (msqMode != null) {
+      MSQMode.populateDefaultQueryContext(msqMode, nativeQueryContextOverrides);
+    }
+
+    // Use the latest row-based frame type. The default is an older type, to ensure compatibility during rolling
+    // updates. Since the Broker is updated last, it's safe to set this property on the Broker.
+    nativeQueryContextOverrides.putIfAbsent(
+        MultiStageQueryContext.CTX_ROW_BASED_FRAME_TYPE,
+        (int) FrameType.latestRowBased().version()
     );
-    FutureUtils.getUnchecked(overlordClient.runTask(taskId, controllerTask), true);
-    return QueryResponse.withEmptyContext(Sequences.simple(Collections.singletonList(new Object[]{taskId})));
+
+    // Add the start time.
+    nativeQueryContextOverrides.put(MultiStageQueryContext.CTX_START_TIME, DateTimes.nowUtc().toString());
+
+    return nativeQueryContextOverrides;
   }
 }

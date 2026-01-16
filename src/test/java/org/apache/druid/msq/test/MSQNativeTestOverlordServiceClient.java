@@ -27,13 +27,18 @@ import org.apache.druid.client.ImmutableSegmentLoadInfo;
 import org.apache.druid.indexer.TaskStatus;
 import org.apache.druid.indexing.common.actions.TaskActionClient;
 import org.apache.druid.java.util.common.ISE;
+import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.exec.NativeControllerImpl;
 import org.apache.druid.msq.exec.WorkerMemoryParameters;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
+import org.apache.druid.msq.sql.MSQTaskQueryKitSpecFactory;
 
 import java.util.List;
 
-public class MSQNativeTestOverlordServiceClient extends MSQTestOverlordServiceClient<MSQNativeControllerTask>
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+public class MSQNativeTestOverlordServiceClient
+    extends MSQTestOverlordServiceClient<MSQNativeControllerTask, NativeControllerImpl>
 {
   public MSQNativeTestOverlordServiceClient(
       ObjectMapper objectMapper,
@@ -52,28 +57,32 @@ public class MSQNativeTestOverlordServiceClient extends MSQTestOverlordServiceCl
     TestQueryListener queryListener = null;
     NativeControllerImpl controller = null;
     MSQTestControllerContext msqTestControllerContext;
+    MSQTestTaskDetails testTaskDetails = registerTestTask(taskId);
     try {
       MSQNativeControllerTask cTask = objectMapper.convertValue(taskObject, MSQNativeControllerTask.class);
 
       msqTestControllerContext = new MSQTestControllerContext(
+          cTask.getId(),
           objectMapper,
           injector,
           taskActionClient,
           workerMemoryParameters,
           loadedSegmentMetadata,
           cTask.getTaskLockType(),
-          cTask.getQuerySpec().getContext()
+          cTask.getQuerySpec().getContext(),
+          emitter
       );
 
-      inMemoryControllerTask.put(cTask.getId(), cTask);
+      assertEquals(taskId, cTask.getId());
+      testTaskDetails.controllerTask = cTask;
 
       controller = new NativeControllerImpl(
-          cTask.getId(),
           cTask.getQuerySpec(),
-          msqTestControllerContext
+          msqTestControllerContext,
+          injector.getInstance(MSQTaskQueryKitSpecFactory.class)
       );
 
-      inMemoryControllers.put(controller.queryId(), controller);
+      testTaskDetails.addController(controller);
 
       queryListener =
           new TestQueryListener(
@@ -83,10 +92,10 @@ public class MSQNativeTestOverlordServiceClient extends MSQTestOverlordServiceCl
 
       try {
         controller.run(queryListener);
-        inMemoryTaskStatus.put(taskId, queryListener.getStatusReport().toTaskStatus(cTask.getId()));
+        testTaskDetails.taskStatus = queryListener.getStatusReport().toTaskStatus(cTask.getId());
       }
       catch (Exception e) {
-        inMemoryTaskStatus.put(taskId, TaskStatus.failure(cTask.getId(), e.toString()));
+        testTaskDetails.taskStatus = TaskStatus.failure(cTask.getId(), e.toString());
       }
       return Futures.immediateFuture(null);
     }
@@ -95,7 +104,7 @@ public class MSQNativeTestOverlordServiceClient extends MSQTestOverlordServiceCl
     }
     finally {
       if (queryListener != null && queryListener.reportMap != null) {
-        reports.put(controller.queryId(), queryListener.getReportMap());
+        testTaskDetails.report = queryListener.getReportMap();
       }
     }
   }
@@ -104,5 +113,11 @@ public class MSQNativeTestOverlordServiceClient extends MSQTestOverlordServiceCl
   protected String getTaskType()
   {
     return MSQNativeControllerTask.TYPE;
+  }
+
+  @Override
+  protected Logger getLogger()
+  {
+    return new Logger(MSQNativeTestOverlordServiceClient.class);
   }
 }

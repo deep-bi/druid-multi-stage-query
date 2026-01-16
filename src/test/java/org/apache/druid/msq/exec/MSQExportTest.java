@@ -22,9 +22,9 @@ package org.apache.druid.msq.exec;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import org.apache.druid.java.util.common.StringUtils;
-import org.apache.druid.msq.sql.MSQTaskQueryMaker;
 import org.apache.druid.msq.test.MSQTestBase;
 import org.apache.druid.msq.util.MultiStageQueryContext;
+import org.apache.druid.msq.util.TaskQueryMakerUtil;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.sql.calcite.util.CalciteTests;
@@ -130,7 +130,7 @@ public class MSQExportTest extends MSQTestBase
   public void testExportRestricted(String unusedContextName, Map<String, Object> context) throws IOException
   {
     // Set expected results based on query's end user
-    boolean isSuperUser = context.get(MSQTaskQueryMaker.USER_KEY).equals(CalciteTests.TEST_SUPERUSER_NAME);
+    boolean isSuperUser = context.get(TaskQueryMakerUtil.USER_KEY).equals(CalciteTests.TEST_SUPERUSER_NAME);
     List<String> expectedResultRows = isSuperUser
                                       ? Arrays.asList("m1", "1.0", "2.0", "3.0", "4.0", "5.0", "6.0")
                                       : Arrays.asList("m1", "6.0");

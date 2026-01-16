@@ -20,6 +20,8 @@
 package org.apache.druid.msq.util;
 
 import org.apache.druid.error.InvalidInput;
+import org.apache.druid.java.util.common.granularity.Granularities;
+import org.apache.druid.java.util.common.granularity.Granularity;
 import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
 import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
@@ -35,6 +37,9 @@ import java.util.stream.Collectors;
 
 public class TaskQueryMakerUtil
 {
+  public static final Granularity DEFAULT_SEGMENT_GRANULARITY = Granularities.ALL;
+  public static final String USER_KEY = "__user";
+
   public static MSQDestination selectDestination(final QueryContext queryContext)
   {
     final MSQSelectDestination msqSelectDestination = MultiStageQueryContext.getSelectDestination(queryContext);

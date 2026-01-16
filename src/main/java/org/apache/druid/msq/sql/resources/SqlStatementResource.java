@@ -25,6 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.CountingOutputStream;
 import com.google.inject.Inject;
+import com.sun.jersey.api.core.HttpContext;
 import org.apache.druid.client.indexing.TaskPayloadResponse;
 import org.apache.druid.client.indexing.TaskStatusResponse;
 import org.apache.druid.error.DruidException;
@@ -66,6 +67,7 @@ import org.apache.druid.server.security.AuthorizerMapper;
 import org.apache.druid.server.security.ForbiddenException;
 import org.apache.druid.sql.DirectStatement;
 import org.apache.druid.sql.HttpStatement;
+import org.apache.druid.sql.SqlQueryPlus;
 import org.apache.druid.sql.SqlRowTransformer;
 import org.apache.druid.sql.SqlStatementFactory;
 import org.apache.druid.sql.http.ResultFormat;
@@ -74,7 +76,6 @@ import org.apache.druid.sql.http.SqlResource;
 import org.apache.druid.storage.StorageConnectorProvider;
 
 import javax.servlet.http.HttpServletRequest;
-import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
@@ -171,17 +172,38 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
 
   @POST
   @Produces(MediaType.APPLICATION_JSON)
-  @Consumes(MediaType.APPLICATION_JSON)
-  public Response doPost(final SqlQuery sqlQuery, @Context final HttpServletRequest req)
+  public Response doPost(
+      @Context final HttpServletRequest req,
+      @Context final HttpContext httpContext
+  )
   {
-    SqlQuery modifiedQuery = createModifiedSqlQuery(sqlQuery);
+    return doPost(SqlQuery.from(httpContext), req);
+  }
 
-    final HttpStatement stmt = msqSqlStatementFactory.httpStatement(modifiedQuery, req);
+  @VisibleForTesting
+  Response doPost(
+      SqlQuery sqlQuery, // Not final: reassigned using createModifiedSqlQuery
+      final HttpServletRequest req
+  )
+  {
+    final SqlQueryPlus sqlQueryPlus;
+    final HttpStatement stmt;
+    final QueryContext queryContext;
+
+    try {
+      sqlQuery = createModifiedSqlQuery(sqlQuery);
+      sqlQueryPlus = SqlResource.makeSqlQueryPlus(sqlQuery, req);
+      queryContext = QueryContext.of(sqlQueryPlus.context());
+      stmt = msqSqlStatementFactory.httpStatement(SqlResource.makeSqlQueryPlus(sqlQuery, req), req);
+    }
+    catch (Exception e) {
+      return SqlResource.handleExceptionBeforeStatementCreated(e, sqlQuery.queryContext());
+    }
+
     final String sqlQueryId = stmt.sqlQueryId();
     final String currThreadName = Thread.currentThread().getName();
     boolean isDebug = false;
     try {
-      QueryContext queryContext = QueryContext.of(modifiedQuery.getContext());
       isDebug = queryContext.isDebug();
       contextChecks(queryContext);
 
@@ -199,7 +221,7 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
         return buildTaskResponse(sequence, stmt.query().authResult());
       } else {
         // Used for EXPLAIN
-        return buildStandardResponse(sequence, modifiedQuery, sqlQueryId, rowTransformer);
+        return buildStandardResponse(sequence, sqlQuery, sqlQueryId, rowTransformer);
       }
     }
     catch (DruidException e) {
@@ -318,7 +340,10 @@ public class SqlStatementResource extends AbstractStatementResource<SqlStatement
       );
       throwIfQueryIsNotSuccessful(queryId, statusPlus);
 
-      final String contentDispositionHeaderValue = filename != null ? StringUtils.format("attachment; filename=\"%s\"", validateFilename(filename)) : null;
+      final String contentDispositionHeaderValue = filename != null ? StringUtils.format(
+          "attachment; filename=\"%s\"",
+          validateFilename(filename)
+      ) : null;
 
       Optional<List<ColumnNameAndTypes>> signature = SqlStatementResourceHelper.getSignature(msqControllerTask);
       if (!signature.isPresent() || MSQControllerTask.isIngestion(msqControllerTask.getQuerySpec())) {

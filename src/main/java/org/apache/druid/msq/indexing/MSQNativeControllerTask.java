@@ -43,6 +43,8 @@ import org.apache.druid.msq.exec.NativeControllerImpl;
 import org.apache.druid.msq.indexing.destination.DataSourceMSQDestination;
 import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
+import org.apache.druid.msq.indexing.error.CancellationReason;
+import org.apache.druid.msq.sql.MSQTaskQueryKitSpecFactory;
 import org.apache.druid.rpc.ServiceClientFactory;
 import org.apache.druid.rpc.StandardRetryPolicy;
 import org.apache.druid.rpc.indexing.OverlordClient;
@@ -62,7 +64,7 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
   public static final String DUMMY_DATASOURCE_FOR_SELECT = "__query_select";
   public static final String DUMMY_DATASOURCE_FOR_EXPORT = "__query_export";
 
-  private final MSQSpec querySpec;
+  private final LegacyMSQSpec querySpec;
   private final RowSignature signature;
   @JacksonInject
   private Injector injector;
@@ -70,7 +72,7 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
 
   public MSQNativeControllerTask(
       @JsonProperty("id") @Nullable String id,
-      @JsonProperty("spec") MSQSpec querySpec,
+      @JsonProperty("spec") LegacyMSQSpec querySpec,
       @JsonProperty("context") @Nullable Map<String, Object> context,
       @JsonProperty("signature") @Nullable RowSignature signature
   )
@@ -89,7 +91,7 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
 
   public MSQNativeControllerTask(
       @Nullable String id,
-      MSQSpec querySpec,
+      LegacyMSQSpec querySpec,
       @Nullable Map<String, Object> context,
       @Nullable RowSignature signature,
       Injector injector
@@ -122,17 +124,13 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
     ServiceMetricEvent.Builder metricBuilder = new ServiceMetricEvent.Builder();
     IndexTaskUtils.setTaskDimensions(metricBuilder, this);
     final ControllerContext context = new IndexerControllerContext(
-        null,
-        this.getDataSource(),
-        this.getQuerySpec().getContext(),
-        this.getContext(),
-        metricBuilder,
+        this,
         toolbox,
         injector,
         clientFactory,
         overlordClient
     );
-    controller = new NativeControllerImpl(this.getId(), querySpec, context);
+    controller = new NativeControllerImpl(querySpec, context, injector.getInstance(MSQTaskQueryKitSpecFactory.class));
 
     final TaskReportQueryListener queryListener = new TaskReportQueryListener(
         querySpec.getDestination(),
@@ -170,7 +168,7 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
 
   @Override
   @JsonProperty("spec")
-  public MSQSpec getQuerySpec()
+  public LegacyMSQSpec getQuerySpec()
   {
     return querySpec;
   }
@@ -185,7 +183,7 @@ public class MSQNativeControllerTask extends AbstractTask implements ClientTaskQ
   public void stopGracefully(TaskConfig taskConfig)
   {
     if (controller != null) {
-      controller.stop();
+      controller.stop(CancellationReason.TASK_SHUTDOWN);
     }
   }
 

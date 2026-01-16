@@ -45,10 +45,10 @@ import org.apache.druid.msq.indexing.destination.MSQSelectDestination;
 import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
 import org.apache.druid.msq.indexing.error.CanceledFault;
 import org.apache.druid.msq.indexing.report.MSQResultsReport;
-import org.apache.druid.msq.sql.MSQTaskQueryMaker;
 import org.apache.druid.msq.test.CounterSnapshotMatcher;
 import org.apache.druid.msq.test.MSQTestBase;
 import org.apache.druid.msq.util.MultiStageQueryContext;
+import org.apache.druid.msq.util.TaskQueryMakerUtil;
 import org.apache.druid.query.DruidMetrics;
 import org.apache.druid.query.InlineDataSource;
 import org.apache.druid.query.JoinAlgorithm;
@@ -806,7 +806,7 @@ public class MSQSelectTest extends MSQTestBase
   @ParameterizedTest(name = "{index}:with context {0}")
   public void testSelectRestricted(String contextName, Map<String, Object> context)
   {
-    boolean isSuperUser = context.get(MSQTaskQueryMaker.USER_KEY).equals(CalciteTests.TEST_SUPERUSER_NAME);
+    boolean isSuperUser = context.get(TaskQueryMakerUtil.USER_KEY).equals(CalciteTests.TEST_SUPERUSER_NAME);
     Policy policy = isSuperUser ? CalciteTests.POLICY_NO_RESTRICTION_SUPERUSER : CalciteTests.POLICY_RESTRICTION;
     long expectedResultRows = isSuperUser ? 6L : 1L;
 
@@ -936,7 +936,7 @@ public class MSQSelectTest extends MSQTestBase
   @ParameterizedTest(name = "{index}:with context {0}")
   public void testJoinRestrictedWithLookup(String contextName, Map<String, Object> context)
   {
-    boolean isSuperUser = context.get(MSQTaskQueryMaker.USER_KEY).equals(CalciteTests.TEST_SUPERUSER_NAME);
+    boolean isSuperUser = context.get(TaskQueryMakerUtil.USER_KEY).equals(CalciteTests.TEST_SUPERUSER_NAME);
     Policy policy = isSuperUser ? CalciteTests.POLICY_NO_RESTRICTION_SUPERUSER : CalciteTests.POLICY_RESTRICTION;
     ImmutableList<Object[]> expectedResult = isSuperUser ? ImmutableList.of(new Object[]{"xabc", 1L}) : ImmutableList.of();
 
@@ -2345,9 +2345,12 @@ public class MSQSelectTest extends MSQTestBase
         ))
         .setExpectedMetricDimensions(
             Map.of(
-                DruidMetrics.DATASOURCE, "foo",
-                DruidMetrics.INTERVAL, List.of(Intervals.ETERNITY.toString()),
-                DruidMetrics.SUCCESS, false
+                DruidMetrics.DATASOURCE,
+                "foo",
+                DruidMetrics.INTERVAL,
+                List.of(Intervals.ETERNITY.toString()),
+                DruidMetrics.SUCCESS,
+                false
             )
         )
         .verifyExecutionError();
@@ -2837,9 +2840,12 @@ public class MSQSelectTest extends MSQTestBase
         ))
         .setExpectedMetricDimensions(
             Map.of(
-                DruidMetrics.DATASOURCE, "foo2",
-                DruidMetrics.INTERVAL, List.of(Intervals.ETERNITY.toString()),
-                DruidMetrics.SUCCESS, true
+                DruidMetrics.DATASOURCE,
+                "foo2",
+                DruidMetrics.INTERVAL,
+                List.of(Intervals.ETERNITY.toString()),
+                DruidMetrics.SUCCESS,
+                true
             )
         )
         .verifyResults();

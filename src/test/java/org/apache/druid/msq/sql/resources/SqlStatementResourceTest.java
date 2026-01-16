@@ -46,8 +46,8 @@ import org.apache.druid.msq.StatementResult;
 import org.apache.druid.msq.counters.ChannelCounters;
 import org.apache.druid.msq.counters.CounterSnapshots;
 import org.apache.druid.msq.counters.CounterSnapshotsTree;
+import org.apache.druid.msq.indexing.LegacyMSQSpec;
 import org.apache.druid.msq.indexing.MSQControllerTask;
-import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.indexing.MSQTuningConfig;
 import org.apache.druid.msq.indexing.destination.DataSourceMSQDestination;
 import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
@@ -57,13 +57,13 @@ import org.apache.druid.msq.indexing.report.MSQStatusReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.indexing.report.MSQTaskReportTest;
-import org.apache.druid.msq.sql.MSQTaskQueryMaker;
 import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.entity.ColumnNameAndTypes;
 import org.apache.druid.msq.sql.entity.PageInformation;
 import org.apache.druid.msq.sql.entity.ResultSetInformation;
 import org.apache.druid.msq.sql.entity.SqlStatementResult;
 import org.apache.druid.msq.test.MSQTestBase;
+import org.apache.druid.msq.util.TaskQueryMakerUtil;
 import org.apache.druid.query.Druids;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.scan.ScanQuery;
@@ -138,7 +138,7 @@ public class SqlStatementResourceTest extends MSQTestBase
                                                                              "2011-04-01T00:00:00.000Z/2011-04-03T00:00:00.000Z"))))
                                                                      .dataSource("target")
                                                                      .context(ImmutableMap.of(
-                                                                         MSQTaskQueryMaker.USER_KEY,
+                                                                         TaskQueryMakerUtil.USER_KEY,
                                                                          AuthConfig.ALLOW_ALL_NAME
                                                                      ))
                                                                      .build();
@@ -146,7 +146,7 @@ public class SqlStatementResourceTest extends MSQTestBase
 
   private static final MSQControllerTask MSQ_CONTROLLER_SELECT_PAYLOAD = new MSQControllerTask(
       ACCEPTED_SELECT_MSQ_QUERY,
-      MSQSpec.builder()
+      LegacyMSQSpec.builder()
              .query(QUERY)
              .columnMappings(
                  ColumnMappings.identity(
@@ -186,7 +186,7 @@ public class SqlStatementResourceTest extends MSQTestBase
 
   private static final MSQControllerTask MSQ_CONTROLLER_INSERT_PAYLOAD = new MSQControllerTask(
       ACCEPTED_SELECT_MSQ_QUERY,
-      MSQSpec.builder()
+      LegacyMSQSpec.builder()
              .query(QUERY)
              .columnMappings(
                  ColumnMappings.identity(

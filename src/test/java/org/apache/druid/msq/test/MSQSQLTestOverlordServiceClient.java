@@ -27,14 +27,18 @@ import org.apache.druid.client.ImmutableSegmentLoadInfo;
 import org.apache.druid.indexer.TaskStatus;
 import org.apache.druid.indexing.common.actions.TaskActionClient;
 import org.apache.druid.java.util.common.ISE;
+import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.exec.ControllerImpl;
 import org.apache.druid.msq.exec.ResultsContext;
 import org.apache.druid.msq.exec.WorkerMemoryParameters;
 import org.apache.druid.msq.indexing.MSQControllerTask;
+import org.apache.druid.msq.sql.MSQTaskQueryKitSpecFactory;
 
 import java.util.List;
 
-public class MSQSQLTestOverlordServiceClient extends MSQTestOverlordServiceClient<MSQControllerTask>
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+public class MSQSQLTestOverlordServiceClient extends MSQTestOverlordServiceClient<MSQControllerTask, ControllerImpl>
 {
   public MSQSQLTestOverlordServiceClient(
       ObjectMapper objectMapper,
@@ -53,29 +57,33 @@ public class MSQSQLTestOverlordServiceClient extends MSQTestOverlordServiceClien
     TestQueryListener queryListener = null;
     ControllerImpl controller = null;
     MSQTestControllerContext msqTestControllerContext;
+    MSQTestTaskDetails testTaskDetails = registerTestTask(taskId);
     try {
       MSQControllerTask cTask = objectMapper.convertValue(taskObject, MSQControllerTask.class);
 
       msqTestControllerContext = new MSQTestControllerContext(
+          cTask.getId(),
           objectMapper,
           injector,
           taskActionClient,
           workerMemoryParameters,
           loadedSegmentMetadata,
           cTask.getTaskLockType(),
-          cTask.getQuerySpec().getContext()
+          cTask.getQuerySpec().getContext(),
+          emitter
       );
 
-      inMemoryControllerTask.put(cTask.getId(), cTask);
+      assertEquals(taskId, cTask.getId());
+      testTaskDetails.controllerTask = cTask;
 
       controller = new ControllerImpl(
-          cTask.getId(),
           cTask.getQuerySpec(),
           new ResultsContext(cTask.getSqlTypeNames(), cTask.getSqlResultsContext()),
-          msqTestControllerContext
+          msqTestControllerContext,
+          injector.getInstance(MSQTaskQueryKitSpecFactory.class)
       );
 
-      inMemoryControllers.put(controller.queryId(), controller);
+      testTaskDetails.addController(controller);
 
       queryListener =
           new TestQueryListener(
@@ -85,10 +93,10 @@ public class MSQSQLTestOverlordServiceClient extends MSQTestOverlordServiceClien
 
       try {
         controller.run(queryListener);
-        inMemoryTaskStatus.put(taskId, queryListener.getStatusReport().toTaskStatus(cTask.getId()));
+        testTaskDetails.taskStatus = queryListener.getStatusReport().toTaskStatus(cTask.getId());
       }
       catch (Exception e) {
-        inMemoryTaskStatus.put(taskId, TaskStatus.failure(cTask.getId(), e.toString()));
+        testTaskDetails.taskStatus = TaskStatus.failure(cTask.getId(), e.toString());
       }
       return Futures.immediateFuture(null);
     }
@@ -97,7 +105,7 @@ public class MSQSQLTestOverlordServiceClient extends MSQTestOverlordServiceClien
     }
     finally {
       if (queryListener != null && queryListener.reportMap != null) {
-        reports.put(controller.queryId(), queryListener.getReportMap());
+        testTaskDetails.report = queryListener.getReportMap();
       }
     }
   }
@@ -106,5 +114,11 @@ public class MSQSQLTestOverlordServiceClient extends MSQTestOverlordServiceClien
   protected String getTaskType()
   {
     return MSQControllerTask.TYPE;
+  }
+
+  @Override
+  protected Logger getLogger()
+  {
+    return new Logger(MSQSQLTestOverlordServiceClient.class);
   }
 }

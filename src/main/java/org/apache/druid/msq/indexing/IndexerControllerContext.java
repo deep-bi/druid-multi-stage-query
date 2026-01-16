@@ -32,7 +32,6 @@ import org.apache.druid.indexing.common.task.AbstractTask;
 import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
-import org.apache.druid.java.util.emitter.service.ServiceMetricEvent;
 import org.apache.druid.msq.exec.Controller;
 import org.apache.druid.msq.exec.ControllerContext;
 import org.apache.druid.msq.exec.ControllerMemoryParameters;
@@ -40,7 +39,6 @@ import org.apache.druid.msq.exec.MSQMetriceEventBuilder;
 import org.apache.druid.msq.exec.MemoryIntrospector;
 import org.apache.druid.msq.exec.SegmentSource;
 import org.apache.druid.msq.exec.WorkerClient;
-import org.apache.druid.msq.exec.WorkerFailureListener;
 import org.apache.druid.msq.exec.WorkerManager;
 import org.apache.druid.msq.guice.MultiStageQuery;
 import org.apache.druid.msq.indexing.client.ControllerChatHandler;
@@ -52,12 +50,9 @@ import org.apache.druid.msq.indexing.error.UnknownFault;
 import org.apache.druid.msq.input.InputSpecSlicer;
 import org.apache.druid.msq.kernel.WorkOrder;
 import org.apache.druid.msq.kernel.controller.ControllerQueryKernelConfig;
-import org.apache.druid.msq.querykit.QueryKit;
-import org.apache.druid.msq.querykit.QueryKitSpec;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.query.BaseQuery;
 import org.apache.druid.query.DruidMetrics;
-import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.QueryContexts;
 import org.apache.druid.rpc.ServiceClientFactory;
@@ -110,7 +105,10 @@ public class IndexerControllerContext<TaskType extends AbstractTask & MsqTask> i
     this.clientFactory = clientFactory;
     this.overlordClient = overlordClient;
     this.memoryIntrospector = injector.getInstance(MemoryIntrospector.class);
-    final StorageConnectorProvider storageConnectorProvider = injector.getInstance(Key.get(StorageConnectorProvider.class, MultiStageQuery.class));
+    final StorageConnectorProvider storageConnectorProvider = injector.getInstance(Key.get(
+        StorageConnectorProvider.class,
+        MultiStageQuery.class
+    ));
     final StorageConnector storageConnector = storageConnectorProvider.createStorageConnector(toolbox.getIndexingTmpDir());
     this.injector = injector.createChildInjector(
         binder -> binder.bind(Key.get(StorageConnector.class, MultiStageQuery.class))

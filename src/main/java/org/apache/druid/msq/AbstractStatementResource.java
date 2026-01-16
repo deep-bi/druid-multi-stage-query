@@ -47,13 +47,13 @@ import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
 import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.kernel.StageDefinition;
 import org.apache.druid.msq.shuffle.input.DurableStorageInputChannelFactory;
-import org.apache.druid.msq.sql.MSQTaskQueryMaker;
 import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.entity.PageInformation;
 import org.apache.druid.msq.sql.entity.ResultSetInformation;
 import org.apache.druid.msq.util.AbstractResourceHelper;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.msq.util.SqlStatementResourceHelper;
+import org.apache.druid.msq.util.TaskQueryMakerUtil;
 import org.apache.druid.query.ExecutionMode;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.QueryContexts;
@@ -182,7 +182,7 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
     TaskType msqControllerTask = getTaskEntity(queryId);
     String queryUser = String.valueOf(msqControllerTask.getQuerySpec()
                                                        .getContext()
-                                                       .get(MSQTaskQueryMaker.USER_KEY));
+                                                       .get(TaskQueryMakerUtil.USER_KEY));
 
     String currentUser = authenticationResult.getIdentity();
 

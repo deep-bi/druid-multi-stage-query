@@ -4,19 +4,19 @@
 
 ## Manual port required (owned & changed)
 - src/main/java/org/apache/druid/msq/dart/controller/sql/DartQueryMaker.java +/-
-- src/main/java/org/apache/druid/msq/exec/Controller.java
-- src/main/java/org/apache/druid/msq/exec/ControllerImpl.java
+- src/main/java/org/apache/druid/msq/exec/Controller.java +
+- src/main/java/org/apache/druid/msq/exec/ControllerImpl.java +/- (native left) +
 - src/main/java/org/apache/druid/msq/guice/MSQIndexingModule.java +
 - src/main/java/org/apache/druid/msq/indexing/IndexerControllerContext.java +
 - src/main/java/org/apache/druid/msq/indexing/MSQControllerTask.java +
-- src/main/java/org/apache/druid/msq/sql/MSQTaskQueryMaker.java
-- src/main/java/org/apache/druid/msq/sql/resources/SqlStatementResource.java
-- src/test/java/org/apache/druid/msq/exec/ControllerImplTest.java
-- src/test/java/org/apache/druid/msq/exec/TestMSQSqlModule.java
-- src/test/java/org/apache/druid/msq/sql/resources/SqlStatementResourceTest.java
-- src/test/java/org/apache/druid/msq/test/MSQTestBase.java
-- src/test/java/org/apache/druid/msq/test/MSQTestOverlordServiceClient.java
-- src/test/java/org/apache/druid/sql/avatica/MSQDruidMeta.java
+- src/main/java/org/apache/druid/msq/sql/MSQTaskQueryMaker.java +
+- src/main/java/org/apache/druid/msq/sql/resources/SqlStatementResource.java +
+- src/test/java/org/apache/druid/msq/exec/ControllerImplTest.java + 
+- src/test/java/org/apache/druid/msq/exec/TestMSQSqlModule.java +
+- src/test/java/org/apache/druid/msq/sql/resources/SqlStatementResourceTest.java +
+- src/test/java/org/apache/druid/msq/test/MSQTestBase.java + (?)
+- src/test/java/org/apache/druid/msq/test/MSQTestOverlordServiceClient.java +
+- src/test/java/org/apache/druid/sql/avatica/MSQDruidMeta.java +
 
 ### Method-level diffs
 ### src/main/java/org/apache/druid/msq/dart/controller/sql/DartQueryMaker.java
