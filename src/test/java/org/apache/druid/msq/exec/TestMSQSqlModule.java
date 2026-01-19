@@ -31,7 +31,6 @@ import org.apache.druid.msq.sql.MSQTaskQueryKitSpecFactory;
 import org.apache.druid.msq.sql.MSQTaskSqlEngine;
 import org.apache.druid.msq.test.MSQSQLTestOverlordServiceClient;
 import org.apache.druid.msq.test.MSQTestBase;
-import org.apache.druid.msq.test.MSQTestOverlordServiceClient;
 import org.apache.druid.msq.test.MSQTestTaskActionClient;
 import org.apache.druid.sql.SqlStatementFactory;
 import org.apache.druid.sql.SqlToolbox;
@@ -54,7 +53,7 @@ public class TestMSQSqlModule extends TestDruidModule
   @LazySingleton
   public MSQTaskSqlEngine createEngine(
       ObjectMapper queryJsonMapper,
-      MSQTestOverlordServiceClient indexingServiceClient,
+      MSQSQLTestOverlordServiceClient indexingServiceClient,
       MSQTaskQueryKitSpecFactory queryKitSpecFactory)
   {
     return new MSQTaskSqlEngine(indexingServiceClient, queryJsonMapper, new SegmentGenerationTerminalStageSpecFactory(), queryKitSpecFactory, null);

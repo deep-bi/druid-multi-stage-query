@@ -34,9 +34,6 @@ import org.apache.druid.catalog.model.table.DatasourceDefn;
 import org.apache.druid.common.guava.FutureUtils;
 import org.apache.druid.data.input.impl.AggregateProjectionSpec;
 import org.apache.druid.error.DruidException;
-import org.apache.druid.error.InvalidInput;
-import org.apache.druid.frame.FrameType;
-import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.Intervals;
 import org.apache.druid.java.util.common.Pair;
 import org.apache.druid.java.util.common.StringUtils;
@@ -58,7 +55,6 @@ import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.msq.util.TaskQueryMakerUtil;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
-import org.apache.druid.query.QueryContexts;
 import org.apache.druid.query.aggregation.AggregatorFactory;
 import org.apache.druid.rpc.indexing.OverlordClient;
 import org.apache.druid.segment.IndexSpec;
@@ -168,7 +164,6 @@ public class MSQTaskQueryMaker implements QueryMaker
     return QueryResponse.withEmptyContext(Sequences.simple(Collections.singletonList(new Object[]{taskId})));
   }
 
-  // TODO: check what could be moved to a Helper
   public static LegacyMSQSpec makeLegacyMSQSpec(
       @Nullable final IngestDestination targetDataSource,
       final DruidQuery druidQuery,
@@ -236,39 +231,14 @@ public class MSQTaskQueryMaker implements QueryMaker
       final MSQDestination destination)
   {
     final QueryContext sqlQueryContext = plannerContext.queryContext();
-    final Map<String, Object> nativeQueryContextOverrides = new HashMap<>();
 
-    // Add appropriate finalization to native query context.
-    final boolean finalizeAggregations = MultiStageQueryContext.isFinalizeAggregations(sqlQueryContext);
-    nativeQueryContextOverrides.put(QueryContexts.FINALIZE_KEY, finalizeAggregations);
+    final boolean isReindex = MSQControllerTask.isReplaceInputDataSourceTask(query, destination);
 
-    // This flag is to ensure backward compatibility, as brokers are upgraded after indexers/middlemanagers.
-    nativeQueryContextOverrides.put(MultiStageQueryContext.WINDOW_FUNCTION_OPERATOR_TRANSFORMATION, true);
-    boolean isReindex = MSQControllerTask.isReplaceInputDataSourceTask(query, destination);
-    if (isReindex) {
-      nativeQueryContextOverrides.put(MultiStageQueryContext.CTX_IS_REINDEX, isReindex);
-    }
-    nativeQueryContextOverrides.putAll(sqlQueryContext.asMap());
-
-    // adding user
-    nativeQueryContextOverrides.put(TaskQueryMakerUtil.USER_KEY, plannerContext.getAuthenticationResult().getIdentity());
-
-    final String msqMode = MultiStageQueryContext.getMSQMode(sqlQueryContext);
-    if (msqMode != null) {
-      MSQMode.populateDefaultQueryContext(msqMode, nativeQueryContextOverrides);
-    }
-
-    // Use the latest row-based frame type. The default is an older type, to ensure compatibility during rolling
-    // updates. Since the Broker is updated last, it's safe to set this property on the Broker.
-    nativeQueryContextOverrides.putIfAbsent(
-        MultiStageQueryContext.CTX_ROW_BASED_FRAME_TYPE,
-        (int) FrameType.latestRowBased().version()
+    return TaskQueryMakerUtil.buildOverrideContext(
+        sqlQueryContext,
+        plannerContext.getAuthenticationResult().getIdentity(),
+        isReindex
     );
-
-    // Add the start time.
-    nativeQueryContextOverrides.put(MultiStageQueryContext.CTX_START_TIME, DateTimes.nowUtc().toString());
-
-    return nativeQueryContextOverrides;
   }
 
   public static QueryDefMSQSpec makeQueryDefMSQSpec(
@@ -498,17 +468,9 @@ public class MSQTaskQueryMaker implements QueryMaker
   private static MSQTuningConfig makeMSQTuningConfig(final PlannerContext plannerContext)
   {
     final QueryContext sqlQueryContext = plannerContext.queryContext();
-    final int maxNumTasks = MultiStageQueryContext.getMaxNumTasks(sqlQueryContext);
-
-    if (maxNumTasks < 2) {
-      throw InvalidInput.exception(
-          "MSQ context maxNumTasks [%,d] cannot be less than 2, since at least 1 controller and 1 worker is necessary",
-          maxNumTasks
-      );
-    }
 
     // This parameter is used internally for the number of worker tasks only, so we subtract 1
-    final int maxNumWorkers = maxNumTasks - 1;
+    final int maxNumWorkers = TaskQueryMakerUtil.getMaxNumWorkers(sqlQueryContext);
     final int rowsPerSegment = MultiStageQueryContext.getRowsPerSegment(sqlQueryContext);
     final int maxRowsInMemory = MultiStageQueryContext.getRowsInMemory(sqlQueryContext);
     final Integer maxNumSegments = MultiStageQueryContext.getMaxNumSegments(sqlQueryContext);

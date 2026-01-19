@@ -19,7 +19,10 @@
 
 package org.apache.druid.msq.util;
 
+import com.google.common.base.Preconditions;
 import org.apache.druid.error.InvalidInput;
+import org.apache.druid.frame.FrameType;
+import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.java.util.common.granularity.Granularity;
 import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
@@ -27,12 +30,16 @@ import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQSelectDestination;
 import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
+import org.apache.druid.msq.sql.MSQMode;
 import org.apache.druid.query.QueryContext;
+import org.apache.druid.query.QueryContexts;
 import org.apache.druid.sql.calcite.parser.DruidSqlIngest;
 import org.apache.druid.sql.destination.ExportDestination;
 import org.apache.druid.sql.http.ResultFormat;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class TaskQueryMakerUtil
@@ -68,5 +75,64 @@ public class TaskQueryMakerUtil
         targetDataSource.getStorageConnectorProvider(),
         format
     );
+  }
+
+  public static Map<String, Object> buildOverrideContext(
+      final QueryContext baseContext,
+      final String userIdentity,
+      final boolean isReindex
+  )
+  {
+    Preconditions.checkNotNull(baseContext, "baseContext");
+
+    final boolean finalizeAggregations = MultiStageQueryContext.isFinalizeAggregations(baseContext);
+
+    final Map<String, Object> overrides = new HashMap<>();
+
+    // Add appropriate finalization to native query context.
+    overrides.put(QueryContexts.FINALIZE_KEY, finalizeAggregations);
+    // This flag is to ensure backward compatibility, as brokers are upgraded after indexers/middlemanagers.
+    overrides.put(MultiStageQueryContext.WINDOW_FUNCTION_OPERATOR_TRANSFORMATION, true);
+
+    if (isReindex) {
+      overrides.put(MultiStageQueryContext.CTX_IS_REINDEX, true);
+    }
+
+    overrides.putAll(baseContext.asMap());
+
+    // adding user
+    overrides.put(TaskQueryMakerUtil.USER_KEY, userIdentity);
+
+    final String msqMode = MultiStageQueryContext.getMSQMode(baseContext);
+    if (msqMode != null) {
+      MSQMode.populateDefaultQueryContext(msqMode, overrides);
+    }
+
+    // Use the latest row-based frame type. The default is an older type, to ensure compatibility during rolling
+    // updates. Since the Broker is updated last, it's safe to set this property on the Broker.
+    overrides.putIfAbsent(
+        MultiStageQueryContext.CTX_ROW_BASED_FRAME_TYPE,
+        (int) FrameType.latestRowBased().version()
+    );
+
+    // Add the start time.
+    overrides.put(MultiStageQueryContext.CTX_START_TIME, DateTimes.nowUtc().toString());
+
+    return overrides;
+  }
+
+  public static int getMaxNumWorkers(final QueryContext queryContext)
+  {
+    Preconditions.checkNotNull(queryContext, "queryContext");
+    final int maxNumTasks = MultiStageQueryContext.getMaxNumTasks(queryContext);
+
+    if (maxNumTasks < 2) {
+      throw org.apache.druid.error.InvalidInput.exception(
+          "MSQ context maxNumTasks [%,d] cannot be less than 2, since at least 1 controller and 1 worker is necessary",
+          maxNumTasks
+      );
+    }
+
+    return maxNumTasks - 1;
   }
 }

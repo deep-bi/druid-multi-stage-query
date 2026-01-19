@@ -22,21 +22,16 @@ package org.apache.druid.msq.nql;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
 import org.apache.druid.common.guava.FutureUtils;
-import org.apache.druid.error.InvalidInput;
-import org.apache.druid.frame.FrameType;
-import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.guava.Sequences;
 import org.apache.druid.msq.exec.MSQTasks;
 import org.apache.druid.msq.indexing.LegacyMSQSpec;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.MSQTuningConfig;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
-import org.apache.druid.msq.sql.MSQMode;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.msq.util.TaskQueryMakerUtil;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
-import org.apache.druid.query.QueryContexts;
 import org.apache.druid.rpc.indexing.OverlordClient;
 import org.apache.druid.segment.IndexSpec;
 import org.apache.druid.segment.column.RowSignature;
@@ -45,7 +40,6 @@ import org.apache.druid.server.security.AuthenticationResult;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 
 public class MSQNativeTaskQueryMaker
@@ -78,16 +72,8 @@ public class MSQNativeTaskQueryMaker
   {
     String taskId = MSQTasks.controllerTaskId(baseQuery.getId());
     final QueryContext queryContext = baseQuery.context();
-    final int maxNumTasks = MultiStageQueryContext.getMaxNumTasks(queryContext);
 
-    if (maxNumTasks < 2) {
-      throw InvalidInput.exception(
-          "MSQ context maxNumTasks [%,d] cannot be less than 2, since at least 1 controller and 1 worker is necessary",
-          maxNumTasks
-      );
-    }
-
-    final int maxNumWorkers = maxNumTasks - 1;
+    final int maxNumWorkers = TaskQueryMakerUtil.getMaxNumWorkers(queryContext);
     final int rowsPerSegment = MultiStageQueryContext.getRowsPerSegment(queryContext);
     final int maxRowsInMemory = MultiStageQueryContext.getRowsInMemory(queryContext);
     final IndexSpec indexSpec = MultiStageQueryContext.getIndexSpec(queryContext, jsonMapper);
@@ -120,36 +106,10 @@ public class MSQNativeTaskQueryMaker
       final AuthenticationResult authenticationResult
   )
   {
-    final boolean finalizeAggregations = MultiStageQueryContext.isFinalizeAggregations(queryContext);
-
-
-    final Map<String, Object> nativeQueryContextOverrides = new HashMap<>();
-
-    // Add appropriate finalization to native query context.
-    nativeQueryContextOverrides.put(QueryContexts.FINALIZE_KEY, finalizeAggregations);
-
-    // This flag is to ensure backward compatibility, as brokers are upgraded after indexers/middlemanagers.
-    nativeQueryContextOverrides.put(MultiStageQueryContext.WINDOW_FUNCTION_OPERATOR_TRANSFORMATION, true);
-
-    nativeQueryContextOverrides.putAll(queryContext.asMap());
-
-    nativeQueryContextOverrides.put(TaskQueryMakerUtil.USER_KEY, authenticationResult.getIdentity());
-
-    final String msqMode = MultiStageQueryContext.getMSQMode(queryContext);
-    if (msqMode != null) {
-      MSQMode.populateDefaultQueryContext(msqMode, nativeQueryContextOverrides);
-    }
-
-    // Use the latest row-based frame type. The default is an older type, to ensure compatibility during rolling
-    // updates. Since the Broker is updated last, it's safe to set this property on the Broker.
-    nativeQueryContextOverrides.putIfAbsent(
-        MultiStageQueryContext.CTX_ROW_BASED_FRAME_TYPE,
-        (int) FrameType.latestRowBased().version()
+    return TaskQueryMakerUtil.buildOverrideContext(
+        queryContext,
+        authenticationResult.getIdentity(),
+        false
     );
-
-    // Add the start time.
-    nativeQueryContextOverrides.put(MultiStageQueryContext.CTX_START_TIME, DateTimes.nowUtc().toString());
-
-    return nativeQueryContextOverrides;
   }
 }

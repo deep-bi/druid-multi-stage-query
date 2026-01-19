@@ -40,7 +40,6 @@ import org.apache.druid.query.groupby.orderby.DefaultLimitSpec;
 import org.apache.druid.query.groupby.orderby.OrderByColumnSpec;
 import org.apache.druid.query.spec.MultipleIntervalSegmentSpec;
 import org.apache.druid.query.spec.QuerySegmentSpec;
-import org.apache.druid.quidem.ProjectPathUtils;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.sql.calcite.planner.ColumnMapping;
@@ -60,38 +59,40 @@ public class MSQSpecCompatTest
 {
   private static final ObjectMapper JSON_MAPPER = CalciteTests.getJsonMapper();
   private static final boolean OVERWRITE = false;
+  public static final File PROJECT_ROOT = findProjectRoot();
+
 
   @Test
   public void testBuilder1(TestInfo info) throws Exception
   {
     RowSignature resultSignature = RowSignature.builder()
-        .add("EXPR$0", ColumnType.LONG)
-        .build();
+                                               .add("EXPR$0", ColumnType.LONG)
+                                               .build();
 
     Map<String, Object> context = ImmutableMap.<String, Object>builder()
-        .put("someThing", 111)
-        .put("sqlInsertSegmentGranularity", "\"DAY\"")
-        .build();
+                                              .put("someThing", 111)
+                                              .put("sqlInsertSegmentGranularity", "\"DAY\"")
+                                              .build();
     MSQSpec msqSpec = LegacyMSQSpec.builder()
-        .query(
-            Druids.newScanQueryBuilder()
-                .dataSource(
-                    InlineDataSource.fromIterable(
-                        ImmutableList.of(new Object[] {2}),
-                        resultSignature
-                    )
-                )
-                .intervals(QuerySegmentSpec.ETERNITY)
-                .columns("EXPR$0")
-                .columnTypes(ColumnType.LONG)
-                .context(context)
-                .build()
-        )
-        .assignmentStrategy(WorkerAssignmentStrategy.AUTO)
-        .columnMappings(ColumnMappings.identity(resultSignature))
-        .tuningConfig(new MSQTuningConfig(1, 2, 3, 4, null))
-        .destination(TaskReportMSQDestination.INSTANCE)
-        .build();
+                                   .query(
+                                       Druids.newScanQueryBuilder()
+                                             .dataSource(
+                                                 InlineDataSource.fromIterable(
+                                                     ImmutableList.of(new Object[]{2}),
+                                                     resultSignature
+                                                 )
+                                             )
+                                             .intervals(QuerySegmentSpec.ETERNITY)
+                                             .columns("EXPR$0")
+                                             .columnTypes(ColumnType.LONG)
+                                             .context(context)
+                                             .build()
+                                   )
+                                   .assignmentStrategy(WorkerAssignmentStrategy.AUTO)
+                                   .columnMappings(ColumnMappings.identity(resultSignature))
+                                   .tuningConfig(new MSQTuningConfig(1, 2, 3, 4, null))
+                                   .destination(TaskReportMSQDestination.INSTANCE)
+                                   .build();
     validateMSQSpecCompat(info, msqSpec, LegacyMSQSpec.class);
   }
 
@@ -99,32 +100,32 @@ public class MSQSpecCompatTest
   public void testBuilder2(TestInfo info) throws Exception
   {
     RowSignature resultSignature = RowSignature.builder()
-        .add("EXPR$0", ColumnType.LONG)
-        .build();
+                                               .add("EXPR$0", ColumnType.LONG)
+                                               .build();
     Map<String, Object> context = ImmutableMap.<String, Object>builder()
-        .put("someThing", 222)
-        .put("sqlInsertSegmentGranularity", "\"DAY\"")
-        .build();
+                                              .put("someThing", 222)
+                                              .put("sqlInsertSegmentGranularity", "\"DAY\"")
+                                              .build();
     MSQSpec msqSpec = LegacyMSQSpec.builder()
-        .query(
-            Druids.newScanQueryBuilder()
-                .dataSource(
-                    InlineDataSource.fromIterable(
-                        ImmutableList.of(new Object[] {2}),
-                        resultSignature
-                    )
-                )
-                .intervals(QuerySegmentSpec.ETERNITY)
-                .columns("EXPR$0")
-                .columnTypes(ColumnType.LONG)
-                .context(context)
-                .build()
-        )
-        .assignmentStrategy(WorkerAssignmentStrategy.MAX)
-        .columnMappings(ColumnMappings.identity(resultSignature))
-        .tuningConfig(MSQTuningConfig.defaultConfig())
-        .destination(DurableStorageMSQDestination.INSTANCE)
-        .build();
+                                   .query(
+                                       Druids.newScanQueryBuilder()
+                                             .dataSource(
+                                                 InlineDataSource.fromIterable(
+                                                     ImmutableList.of(new Object[]{2}),
+                                                     resultSignature
+                                                 )
+                                             )
+                                             .intervals(QuerySegmentSpec.ETERNITY)
+                                             .columns("EXPR$0")
+                                             .columnTypes(ColumnType.LONG)
+                                             .context(context)
+                                             .build()
+                                   )
+                                   .assignmentStrategy(WorkerAssignmentStrategy.MAX)
+                                   .columnMappings(ColumnMappings.identity(resultSignature))
+                                   .tuningConfig(MSQTuningConfig.defaultConfig())
+                                   .destination(DurableStorageMSQDestination.INSTANCE)
+                                   .build();
     validateMSQSpecCompat(info, msqSpec, LegacyMSQSpec.class);
   }
 
@@ -133,33 +134,33 @@ public class MSQSpecCompatTest
   {
     MSQSpec msqSpec = new LegacyMSQSpec(
         GroupByQuery.builder()
-            .setDataSource("foo")
-            .setInterval(Intervals.ONLY_ETERNITY)
-            .setDimFilter(new NotDimFilter(new NullFilter("dim1", null)))
-            .setGranularity(Granularities.ALL)
-            .setDimensions(
-                new DefaultDimensionSpec("__time", "d0", ColumnType.LONG),
-                new DefaultDimensionSpec("dim1", "d1", ColumnType.STRING)
-            )
-            .setContext(
-                ImmutableMap.<String, Object>builder()
-                    .put("__user", "allowAll")
-                    .put("finalize", true)
-                    .put("maxNumTasks", 2)
-                    .put("maxParseExceptions", 0)
-                    .put("sqlInsertSegmentGranularity", "\"DAY\"")
-                    .put("sqlQueryId", "test-query")
-                    .put("sqlStringifyArrays", false)
-                    .build()
-            )
-            .setLimitSpec(
-                DefaultLimitSpec.builder()
-                    .orderBy(OrderByColumnSpec.asc("d1"))
-                    .build()
-            )
-            .setAggregatorSpecs(new CountAggregatorFactory("a0"))
-            .setQuerySegmentSpec(new MultipleIntervalSegmentSpec(Intervals.ONLY_ETERNITY))
-            .build(),
+                    .setDataSource("foo")
+                    .setInterval(Intervals.ONLY_ETERNITY)
+                    .setDimFilter(new NotDimFilter(new NullFilter("dim1", null)))
+                    .setGranularity(Granularities.ALL)
+                    .setDimensions(
+                        new DefaultDimensionSpec("__time", "d0", ColumnType.LONG),
+                        new DefaultDimensionSpec("dim1", "d1", ColumnType.STRING)
+                    )
+                    .setContext(
+                        ImmutableMap.<String, Object>builder()
+                                    .put("__user", "allowAll")
+                                    .put("finalize", true)
+                                    .put("maxNumTasks", 2)
+                                    .put("maxParseExceptions", 0)
+                                    .put("sqlInsertSegmentGranularity", "\"DAY\"")
+                                    .put("sqlQueryId", "test-query")
+                                    .put("sqlStringifyArrays", false)
+                                    .build()
+                    )
+                    .setLimitSpec(
+                        DefaultLimitSpec.builder()
+                                        .orderBy(OrderByColumnSpec.asc("d1"))
+                                        .build()
+                    )
+                    .setAggregatorSpecs(new CountAggregatorFactory("a0"))
+                    .setQuerySegmentSpec(new MultipleIntervalSegmentSpec(Intervals.ONLY_ETERNITY))
+                    .build(),
         new ColumnMappings(
             ImmutableList.of(
                 new ColumnMapping("d0", "__time"),
@@ -183,7 +184,8 @@ public class MSQSpecCompatTest
     validateMSQSpecCompat(info, msqSpec, LegacyMSQSpec.class);
   }
 
-  private void validateMSQSpecCompat(TestInfo info, MSQSpec msqSpec, Class<? extends MSQSpec> valueType) throws Exception
+  private void validateMSQSpecCompat(TestInfo info, MSQSpec msqSpec, Class<? extends MSQSpec> valueType)
+      throws Exception
   {
     String str = JSON_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(msqSpec);
     MSQSpec readBack = JSON_MAPPER.readValue(str, valueType);
@@ -202,10 +204,21 @@ public class MSQSpecCompatTest
   private Path getTestDataPath(TestInfo info)
   {
     String testMethodName = info.getTestMethod().get().getName();
-    File f = ProjectPathUtils.getPathFromProjectRoot(
-        "extensions-core/multi-stage-query/src/test/resources/" + getClass().getName() + "/" + testMethodName + ".json"
+    File f = new File(
+        PROJECT_ROOT,
+        "src/test/resources/" + getClass().getName() + "/" + testMethodName + ".json"
     );
-    Path p = f.toPath();
-    return p;
+    return f.toPath();
+  }
+
+  protected static File findProjectRoot()
+  {
+    for (File f = (new File(".")).getAbsoluteFile(); f != null; f = f.getParentFile()) {
+      if (f.getName().equals("druid-multi-stage-query")) {
+        return f;
+      }
+    }
+
+    throw new IllegalStateException("Can't find project root!");
   }
 }
