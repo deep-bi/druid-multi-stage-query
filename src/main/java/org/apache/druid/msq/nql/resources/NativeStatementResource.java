@@ -197,14 +197,13 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
 
       RowSignature signature = getRowSignature(query);
       MSQNativeTaskQueryMaker taskQueryMaker = new MSQNativeTaskQueryMaker(
-          null,
           overlordClient,
           jsonMapper,
           getColumnMappings(signature),
           signature
       );
 
-      QueryResponse<Object[]> response = taskQueryMaker.runNativeQuery(query);
+      QueryResponse<Object[]> response = taskQueryMaker.runNativeQuery(query, authenticationResult);
       final Sequence<Object[]> sequence = response.getResults();
 
       return buildTaskResponse(sequence, authenticationResult);

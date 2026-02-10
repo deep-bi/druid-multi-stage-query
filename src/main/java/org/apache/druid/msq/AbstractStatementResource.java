@@ -39,7 +39,7 @@ import org.apache.druid.java.util.common.guava.Yielder;
 import org.apache.druid.java.util.common.guava.Yielders;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
-import org.apache.druid.msq.indexing.IsMSQTask;
+import org.apache.druid.msq.indexing.MsqTask;
 import org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
 import org.apache.druid.msq.indexing.destination.MSQSelectDestination;
@@ -47,13 +47,13 @@ import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
 import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.kernel.StageDefinition;
 import org.apache.druid.msq.shuffle.input.DurableStorageInputChannelFactory;
-import org.apache.druid.msq.sql.MSQTaskQueryMaker;
 import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.entity.PageInformation;
 import org.apache.druid.msq.sql.entity.ResultSetInformation;
 import org.apache.druid.msq.util.AbstractResourceHelper;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.msq.util.SqlStatementResourceHelper;
+import org.apache.druid.msq.util.TaskQueryMakerUtil;
 import org.apache.druid.query.ExecutionMode;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.QueryContexts;
@@ -81,7 +81,7 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-public abstract class AbstractStatementResource<ResultType extends StatementResult, TaskType extends AbstractTask & IsMSQTask>
+public abstract class AbstractStatementResource<ResultType extends StatementResult, TaskType extends AbstractTask & MsqTask>
 {
   public static final String CONTENT_DISPOSITION_RESPONSE_HEADER = "Content-Disposition";
   protected static final Pattern FILENAME_PATTERN = Pattern.compile("^[^/:*?><\\\\\"|\0\n\r]*$");
@@ -182,7 +182,7 @@ public abstract class AbstractStatementResource<ResultType extends StatementResu
     TaskType msqControllerTask = getTaskEntity(queryId);
     String queryUser = String.valueOf(msqControllerTask.getQuerySpec()
                                                        .getContext()
-                                                       .get(MSQTaskQueryMaker.USER_KEY));
+                                                       .get(TaskQueryMakerUtil.USER_KEY));
 
     String currentUser = authenticationResult.getIdentity();
 

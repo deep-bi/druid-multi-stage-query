@@ -28,14 +28,19 @@ import org.apache.druid.client.ImmutableSegmentLoadInfo;
 import org.apache.druid.client.indexing.ClientTaskQuery;
 import org.apache.druid.client.indexing.TaskPayloadResponse;
 import org.apache.druid.client.indexing.TaskStatusResponse;
+import org.apache.druid.error.DruidException;
 import org.apache.druid.indexer.TaskStatus;
 import org.apache.druid.indexer.TaskStatusPlus;
 import org.apache.druid.indexer.report.TaskReport;
 import org.apache.druid.indexing.common.actions.TaskActionClient;
 import org.apache.druid.indexing.common.task.AbstractTask;
 import org.apache.druid.java.util.common.DateTimes;
-import org.apache.druid.msq.exec.Controller;
+import org.apache.druid.java.util.common.logger.Logger;
+import org.apache.druid.java.util.metrics.StubServiceEmitter;
+import org.apache.druid.msq.exec.AbstractController;
 import org.apache.druid.msq.exec.WorkerMemoryParameters;
+import org.apache.druid.msq.indexing.MsqTask;
+import org.apache.druid.msq.indexing.error.CancellationReason;
 import org.apache.druid.rpc.indexing.NoopOverlordClient;
 import org.joda.time.DateTime;
 
@@ -44,21 +49,64 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public abstract class MSQTestOverlordServiceClient<TaskType extends AbstractTask & ClientTaskQuery>
+public abstract class MSQTestOverlordServiceClient<TaskType extends AbstractTask & ClientTaskQuery & MsqTask, ControllerType extends AbstractController<TaskType>>
     extends NoopOverlordClient
 {
-  public static final DateTime CREATED_TIME = DateTimes.of("2023-05-31T12:00Z");
-  public static final DateTime QUEUE_INSERTION_TIME = DateTimes.of("2023-05-31T12:01Z");
-  public static final long DURATION = 100L;
   protected final Injector injector;
   protected final ObjectMapper objectMapper;
   protected final TaskActionClient taskActionClient;
   protected final WorkerMemoryParameters workerMemoryParameters;
   protected final List<ImmutableSegmentLoadInfo> loadedSegmentMetadata;
-  protected final Map<String, Controller> inMemoryControllers = new HashMap<>();
-  protected final Map<String, TaskReport.ReportMap> reports = new HashMap<>();
-  protected final Map<String, TaskType> inMemoryControllerTask = new HashMap<>();
-  protected final Map<String, TaskStatus> inMemoryTaskStatus = new HashMap<>();
+  protected final StubServiceEmitter emitter;
+
+  private final Map<String, MSQTestTaskDetails> taskDetailsByTaskId = new HashMap<>();
+  private final Map<String, MSQTestTaskDetails> taskDetailsByQueryId = new HashMap<>();
+
+  public static final DateTime CREATED_TIME = DateTimes.of("2023-05-31T12:00Z");
+  public static final DateTime QUEUE_INSERTION_TIME = DateTimes.of("2023-05-31T12:01Z");
+  public static final String TEST_METRIC_DIMENSION = "testTaskType";
+  public static final String METRIC_CONTROLLER_TASK_TYPE = "controller";
+  public static final String METRIC_WORKER_TASK_TYPE = "worker";
+
+  public static final long DURATION = 100L;
+
+  public class MSQTestTaskDetails implements AutoCloseable
+  {
+    private String taskId;
+    public TaskType controllerTask;
+    protected ControllerType controller;
+    protected TaskStatus taskStatus;
+    public TaskReport.ReportMap report;
+
+    MSQTestTaskDetails(String taskId)
+    {
+      this.taskId = taskId;
+    }
+
+    public void addController(ControllerType controller)
+    {
+      if (this.controller != null) {
+        throw DruidException.defensive("Attempt to register a second controller!");
+      }
+      this.controller = controller;
+      registerController(controller.queryId(), this);
+    }
+
+    public ControllerType getController(String queryId)
+    {
+      if (controller.queryId().equals(queryId)) {
+        return controller;
+      }
+      return null;
+    }
+
+    @Override
+    public void close()
+    {
+      taskDetailsByTaskId.remove(taskId);
+      taskDetailsByQueryId.remove(controller.queryId());
+    }
+  }
 
   public MSQTestOverlordServiceClient(
       ObjectMapper objectMapper,
@@ -73,16 +121,47 @@ public abstract class MSQTestOverlordServiceClient<TaskType extends AbstractTask
     this.taskActionClient = taskActionClient;
     this.workerMemoryParameters = workerMemoryParameters;
     this.loadedSegmentMetadata = loadedSegmentMetadata;
+    this.emitter = new StubServiceEmitter();
   }
 
   @Override
   public abstract ListenableFuture<Void> runTask(String taskId, Object taskObject);
 
+  protected MSQTestTaskDetails registerTestTask(String taskId)
+  {
+    MSQTestTaskDetails details = taskDetailsByTaskId.get(taskId);
+    if (details != null) {
+      getLogger().warn("There is an un-closed taskId which will be overwritten; closing implicitly");
+      details.close();
+    }
+    details = new MSQTestTaskDetails(taskId);
+    taskDetailsByTaskId.put(taskId, details);
+    return details;
+  }
+
+  private void registerController(String queryId, MSQTestTaskDetails msqTestTaskDetails)
+  {
+    MSQTestTaskDetails old = taskDetailsByQueryId.get(queryId);
+    if (old != null) {
+      throw DruidException.defensive("There is an existing queryId {}!", queryId);
+    }
+    taskDetailsByQueryId.put(queryId, msqTestTaskDetails);
+  }
+
   @Override
   public ListenableFuture<Void> cancelTask(String taskId)
   {
-    inMemoryControllers.get(taskId).stop();
+    getControllerForQueryId(taskId).stop(CancellationReason.TASK_SHUTDOWN);
     return Futures.immediateFuture(null);
+  }
+
+  private ControllerType getControllerForQueryId(String queryId)
+  {
+    MSQTestTaskDetails details = taskDetailsByQueryId.get(queryId);
+    if (details == null) {
+      return null;
+    }
+    return details.getController(queryId);
   }
 
   @Override
@@ -103,7 +182,8 @@ public abstract class MSQTestOverlordServiceClient<TaskType extends AbstractTask
   public ListenableFuture<TaskStatusResponse> taskStatus(String taskId)
   {
     SettableFuture<TaskStatusResponse> future = SettableFuture.create();
-    TaskStatus taskStatus = inMemoryTaskStatus.get(taskId);
+    MSQTestTaskDetails details = taskDetailsByTaskId.get(taskId);
+    TaskStatus taskStatus = details.taskStatus;
     future.set(new TaskStatusResponse(taskId, new TaskStatusPlus(
         taskId,
         null,
@@ -125,14 +205,32 @@ public abstract class MSQTestOverlordServiceClient<TaskType extends AbstractTask
   @Nullable
   public TaskReport.ReportMap getReportForTask(String id)
   {
-    return reports.get(id);
+    MSQTestTaskDetails details = taskDetailsByQueryId.get(id);
+    return details.report;
   }
 
   @Nullable
   TaskType getMSQControllerTask(String id)
   {
-    return inMemoryControllerTask.get(id);
+    MSQTestTaskDetails details = taskDetailsByTaskId.get(id);
+    return details.controllerTask;
+  }
+
+  public void closeTask(String taskId)
+  {
+
+    taskDetailsByTaskId.get(taskId).close();
+  }
+
+  /**
+   * Returns a list of emitted metrics matching the name and user dimensions.
+   */
+  public List<Number> getEmittedMetrics(String metricName, Map<String, Object> dimensionFilters)
+  {
+    return emitter.getMetricValues(metricName, dimensionFilters);
   }
 
   protected abstract String getTaskType();
+
+  protected abstract Logger getLogger();
 }

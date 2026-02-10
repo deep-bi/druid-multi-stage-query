@@ -36,8 +36,8 @@ import org.apache.druid.java.util.http.client.response.StringFullResponseHolder;
 import org.apache.druid.msq.counters.ChannelCounters;
 import org.apache.druid.msq.counters.CounterSnapshots;
 import org.apache.druid.msq.counters.CounterSnapshotsTree;
+import org.apache.druid.msq.indexing.LegacyMSQSpec;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
-import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.indexing.MSQTuningConfig;
 import org.apache.druid.msq.indexing.destination.TaskReportMSQDestination;
 import org.apache.druid.msq.indexing.report.MSQResultsReport;
@@ -275,14 +275,14 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
   {
     return new MSQNativeControllerTask(
         ACCEPTED_SELECT_MSQ_QUERY,
-        MSQSpec.builder()
-               .query(objectMapper.readValue(SIMPLE_SCAN_QUERY, Query.class))
-               .columnMappings(
+        LegacyMSQSpec.builder()
+                     .query(objectMapper.readValue(SIMPLE_SCAN_QUERY, Query.class))
+                     .columnMappings(
                    ColumnMappings.identity(ROW_SIGNATURE))
-               .destination(TaskReportMSQDestination.instance())
-               .tuningConfig(
+                     .destination(TaskReportMSQDestination.instance())
+                     .tuningConfig(
                    MSQTuningConfig.defaultConfig())
-               .build(),
+                     .build(),
         new HashMap<>(),
         ROW_SIGNATURE
     );

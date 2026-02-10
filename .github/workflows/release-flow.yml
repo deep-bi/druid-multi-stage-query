@@ -21,6 +21,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate branch name (*-rc)
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="${GITHUB_REF_NAME:-}"
+          if [[ -z "$REF" ]]; then
+            echo "::error ::GITHUB_REF_NAME is empty"
+            exit 1
+          fi
+          if [[ "$REF" != *-rc ]]; then
+            echo "::error ::workflow must run from a candidate branch ending with '-rc' (got: '$REF')"
+            exit 1
+          fi
+
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:

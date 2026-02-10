@@ -79,6 +79,12 @@ public class MSQCalciteSelectJoinQueryTest
     {
       return JoinAlgorithm.SORT_MERGE;
     }
+
+    @Override
+    public void testJoinOnRestrictedBroadcast(Map<String, Object> queryContext)
+    {
+      // Skip testing sort-merge join for restricted broadcast, this test is not applicable.
+    }
   }
 
   @SqlTestFrameworkConfig.ComponentSupplier(StandardMSQComponentSupplier.class)

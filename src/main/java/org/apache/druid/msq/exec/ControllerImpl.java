@@ -25,8 +25,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.ListenableFuture;
-import it.unimi.dsi.fastutil.ints.IntList;
-import org.apache.druid.data.input.impl.DimensionSchema;
 import org.apache.druid.data.input.impl.DimensionsSpec;
 import org.apache.druid.error.DruidException;
 import org.apache.druid.frame.channel.ReadableFrameChannel;
@@ -51,7 +49,6 @@ import org.apache.druid.indexing.common.task.batch.TooManyBucketsException;
 import org.apache.druid.indexing.common.task.batch.parallel.TombstoneHelper;
 import org.apache.druid.indexing.overlord.SegmentPublishResult;
 import org.apache.druid.java.util.common.DateTimes;
-import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.JodaUtils;
 import org.apache.druid.java.util.common.Pair;
 import org.apache.druid.java.util.common.StringUtils;
@@ -59,9 +56,11 @@ import org.apache.druid.java.util.common.granularity.Granularity;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.counters.CounterSnapshotsTree;
+import org.apache.druid.msq.indexing.LegacyMSQSpec;
 import org.apache.druid.msq.indexing.MSQControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.indexing.MSQTuningConfig;
+import org.apache.druid.msq.indexing.QueryDefMSQSpec;
 import org.apache.druid.msq.indexing.destination.DataSourceMSQDestination;
 import org.apache.druid.msq.indexing.destination.ExportMSQDestination;
 import org.apache.druid.msq.indexing.error.CannotParseExternalDataFault;
@@ -71,29 +70,21 @@ import org.apache.druid.msq.indexing.error.MSQErrorReport;
 import org.apache.druid.msq.indexing.error.MSQException;
 import org.apache.druid.msq.indexing.error.TooManyBucketsFault;
 import org.apache.druid.msq.indexing.error.UnknownFault;
-import org.apache.druid.msq.indexing.processor.SegmentGeneratorFrameProcessorFactory;
+import org.apache.druid.msq.indexing.processor.SegmentGeneratorStageProcessor;
 import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
 import org.apache.druid.msq.input.InputSpecSlicerFactory;
 import org.apache.druid.msq.kernel.QueryDefinition;
 import org.apache.druid.msq.kernel.StageId;
 import org.apache.druid.msq.kernel.controller.ControllerQueryKernel;
-import org.apache.druid.msq.util.ArrayIngestMode;
 import org.apache.druid.msq.util.ControllerUtil;
-import org.apache.druid.msq.util.DimensionSchemaUtils;
 import org.apache.druid.msq.util.IntervalUtils;
 import org.apache.druid.msq.util.MultiStageQueryContext;
-import org.apache.druid.msq.util.PassthroughAggregatorFactory;
 import org.apache.druid.msq.util.SqlStatementResourceHelper;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.aggregation.AggregatorFactory;
 import org.apache.druid.query.groupby.GroupByQuery;
-import org.apache.druid.segment.DimensionHandlerUtils;
 import org.apache.druid.segment.IndexSpec;
-import org.apache.druid.segment.column.ColumnHolder;
-import org.apache.druid.segment.column.ColumnType;
-import org.apache.druid.segment.column.RowSignature;
-import org.apache.druid.segment.column.ValueType;
 import org.apache.druid.segment.indexing.DataSchema;
 import org.apache.druid.segment.transform.CompactionTransformSpec;
 import org.apache.druid.segment.transform.TransformSpec;
@@ -103,7 +94,6 @@ import org.apache.druid.timeline.CompactionState;
 import org.apache.druid.timeline.DataSegment;
 import org.apache.druid.timeline.partition.DimensionRangeShardSpec;
 import org.apache.druid.timeline.partition.ShardSpec;
-import org.apache.druid.utils.CollectionUtils;
 import org.joda.time.Interval;
 
 import javax.annotation.Nullable;
@@ -113,9 +103,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
@@ -128,13 +116,24 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
 
 
   public ControllerImpl(
-      final String queryId,
-      final MSQSpec querySpec,
+      final LegacyMSQSpec querySpec,
       final ResultsContext resultsContext,
-      final ControllerContext controllerContext
+      final ControllerContext controllerContext,
+      final QueryKitSpecFactory queryKitSpecFactory
   )
   {
-    super(queryId, querySpec, controllerContext);
+    super(querySpec, controllerContext, queryKitSpecFactory);
+    this.resultsContext = Preconditions.checkNotNull(resultsContext, "resultsContext");
+  }
+
+  public ControllerImpl(
+      final QueryDefMSQSpec querySpec,
+      final ResultsContext resultsContext,
+      final ControllerContext controllerContext,
+      final QueryKitSpecFactory queryKitSpecFactory
+  )
+  {
+    super(querySpec, controllerContext, queryKitSpecFactory);
     this.resultsContext = Preconditions.checkNotNull(resultsContext, "resultsContext");
   }
 
@@ -146,162 +145,9 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     if (taskLockType.equals(TaskLockType.APPEND)) {
       return SegmentTransactionalAppendAction.forSegments(segments, null);
     } else if (taskLockType.equals(TaskLockType.SHARED)) {
-      return SegmentTransactionalInsertAction.appendAction(segments, null, null, null);
+      return SegmentTransactionalInsertAction.appendAction(segments, null, null, null, null, null);
     } else {
       throw DruidException.defensive("Invalid lock type [%s] received for append action", taskLockType);
-    }
-  }
-
-  private static Pair<List<DimensionSchema>, List<AggregatorFactory>> makeDimensionsAndAggregatorsForIngestion(
-      final RowSignature querySignature,
-      final ClusterBy queryClusterBy,
-      final List<String> segmentSortOrder,
-      final ColumnMappings columnMappings,
-      final boolean isRollupQuery,
-      final Query<?> query
-  )
-  {
-    // Log a warning unconditionally if arrayIngestMode is MVD, since the behaviour is incorrect, and is subject to
-    // deprecation and removal in future
-    if (MultiStageQueryContext.getArrayIngestMode(query.context()) == ArrayIngestMode.MVD) {
-      log.warn(
-          "'%s' is set to 'mvd' in the query's context. This ingests the string arrays as multi-value "
-          + "strings instead of arrays, and is preserved for legacy reasons when MVDs were the only way to ingest string "
-          + "arrays in Druid. It is incorrect behaviour and will likely be removed in the future releases of Druid",
-          MultiStageQueryContext.CTX_ARRAY_INGEST_MODE
-      );
-    }
-
-    final List<DimensionSchema> dimensions = new ArrayList<>();
-    final List<AggregatorFactory> aggregators = new ArrayList<>();
-
-    // During ingestion, segment sort order is determined by the order of fields in the DimensionsSchema. We want
-    // this to match user intent as dictated by the declared segment sort order and CLUSTERED BY, so add things in
-    // that order.
-
-    // Start with segmentSortOrder.
-    final Set<String> outputColumnsInOrder = new LinkedHashSet<>(segmentSortOrder);
-
-    // Then the query-level CLUSTERED BY.
-    // Note: this doesn't work when CLUSTERED BY specifies an expression that is not being selected.
-    // Such fields in CLUSTERED BY still control partitioning as expected, but do not affect sort order of rows
-    // within an individual segment.
-    for (final KeyColumn clusterByColumn : queryClusterBy.getColumns()) {
-      final IntList outputColumns = columnMappings.getOutputColumnsForQueryColumn(clusterByColumn.columnName());
-      for (final int outputColumn : outputColumns) {
-        outputColumnsInOrder.add(columnMappings.getOutputColumnName(outputColumn));
-      }
-    }
-
-    // Then all other columns.
-    outputColumnsInOrder.addAll(columnMappings.getOutputColumnNames());
-
-    Map<String, AggregatorFactory> outputColumnAggregatorFactories = new HashMap<>();
-
-    if (isRollupQuery) {
-      // Populate aggregators from the native query when doing an ingest in rollup mode.
-      for (AggregatorFactory aggregatorFactory : ((GroupByQuery) query).getAggregatorSpecs()) {
-        for (final int outputColumn : columnMappings.getOutputColumnsForQueryColumn(aggregatorFactory.getName())) {
-          final String outputColumnName = columnMappings.getOutputColumnName(outputColumn);
-          if (outputColumnAggregatorFactories.containsKey(outputColumnName)) {
-            throw new ISE("There can only be one aggregation for column [%s].", outputColumn);
-          } else {
-            outputColumnAggregatorFactories.put(
-                outputColumnName,
-                aggregatorFactory.withName(outputColumnName).getCombiningFactory()
-            );
-          }
-        }
-      }
-    }
-
-    // Each column can be of either time, dimension, aggregator. For this method. we can ignore the time column.
-    // For non-complex columns, If the aggregator factory of the column is not available, we treat the column as
-    // a dimension. For complex columns, certains hacks are in place.
-    for (final String outputColumnName : outputColumnsInOrder) {
-      // CollectionUtils.getOnlyElement because this method is only called during ingestion, where we require
-      // that output names be unique.
-      final int outputColumn = CollectionUtils.getOnlyElement(
-          columnMappings.getOutputColumnsByName(outputColumnName),
-          xs -> new ISE("Expected single output column for name [%s], but got [%s]", outputColumnName, xs)
-      );
-      final String queryColumn = columnMappings.getQueryColumnName(outputColumn);
-      final ColumnType type =
-          querySignature.getColumnType(queryColumn)
-                        .orElseThrow(() -> new ISE("No type for column [%s]", outputColumnName));
-
-      if (!outputColumnName.equals(ColumnHolder.TIME_COLUMN_NAME)) {
-
-        if (!type.is(ValueType.COMPLEX)) {
-          // non complex columns
-          populateDimensionsAndAggregators(
-              dimensions,
-              aggregators,
-              outputColumnAggregatorFactories,
-              outputColumnName,
-              type,
-              query.context()
-          );
-        } else {
-          // complex columns only
-          if (DimensionHandlerUtils.DIMENSION_HANDLER_PROVIDERS.containsKey(type.getComplexTypeName())) {
-            dimensions.add(
-                DimensionSchemaUtils.createDimensionSchema(
-                    outputColumnName,
-                    type,
-                    MultiStageQueryContext.useAutoColumnSchemas(query.context()),
-                    MultiStageQueryContext.getArrayIngestMode(query.context())
-                )
-            );
-          } else if (!isRollupQuery) {
-            aggregators.add(new PassthroughAggregatorFactory(outputColumnName, type.getComplexTypeName()));
-          } else {
-            populateDimensionsAndAggregators(
-                dimensions,
-                aggregators,
-                outputColumnAggregatorFactories,
-                outputColumnName,
-                type,
-                query.context()
-            );
-          }
-        }
-      }
-    }
-
-    return Pair.of(dimensions, aggregators);
-  }
-
-  /**
-   * If the output column is present in the outputColumnAggregatorFactories that means we already have the aggregator information for this column.
-   * else treat this column as a dimension.
-   *
-   * @param dimensions                      list is poulated if the output col is deemed to be a dimension
-   * @param aggregators                     list is populated with the aggregator if the output col is deemed to be a aggregation column.
-   * @param outputColumnAggregatorFactories output col -> AggregatorFactory map
-   * @param outputColumn                    column name
-   * @param type                            columnType
-   */
-  private static void populateDimensionsAndAggregators(
-      List<DimensionSchema> dimensions,
-      List<AggregatorFactory> aggregators,
-      Map<String, AggregatorFactory> outputColumnAggregatorFactories,
-      String outputColumn,
-      ColumnType type,
-      QueryContext context
-  )
-  {
-    if (outputColumnAggregatorFactories.containsKey(outputColumn)) {
-      aggregators.add(outputColumnAggregatorFactories.get(outputColumn));
-    } else {
-      dimensions.add(
-          DimensionSchemaUtils.createDimensionSchema(
-              outputColumn,
-              type,
-              MultiStageQueryContext.useAutoColumnSchemas(context),
-              MultiStageQueryContext.getArrayIngestMode(context)
-          )
-      );
     }
   }
 
@@ -398,23 +244,7 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     CompactionTransformSpec transformSpec = TransformSpec.NONE.equals(dataSchema.getTransformSpec())
                                             ? null
                                             : CompactionTransformSpec.of(dataSchema.getTransformSpec());
-    List<AggregatorFactory> metricsSpec = Collections.emptyList();
-
-    if (querySpec.getQuery() instanceof GroupByQuery) {
-      // For group-by queries, the aggregators are transformed to their combining factories in the dataschema, resulting
-      // in a mismatch between schema in compaction spec and the one in compaction state. Sourcing the original
-      // AggregatorFactory definition for aggregators in the dataSchema, therefore, directly from the querySpec.
-      GroupByQuery groupByQuery = (GroupByQuery) querySpec.getQuery();
-      // Collect all aggregators that are part of the current dataSchema, since a non-rollup query (isRollup() is false)
-      // moves metrics columns to dimensions in the final schema.
-      Set<String> aggregatorsInDataSchema = Arrays.stream(dataSchema.getAggregators())
-                                                  .map(AggregatorFactory::getName)
-                                                  .collect(Collectors.toSet());
-      metricsSpec = groupByQuery.getAggregatorSpecs()
-                                .stream()
-                                .filter(aggregatorFactory -> aggregatorsInDataSchema.contains(aggregatorFactory.getName()))
-                                .collect(Collectors.toList());
-    }
+    List<AggregatorFactory> metricsSpec = buildMSQCompactionMetrics(querySpec, dataSchema);
 
     IndexSpec indexSpec = tuningConfig.getIndexSpec();
 
@@ -429,6 +259,34 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
         granularitySpec,
         dataSchema.getProjections()
     );
+  }
+
+  public static List<AggregatorFactory> buildMSQCompactionMetrics(MSQSpec msqSpec, DataSchema dataSchema)
+  {
+    if (!(msqSpec instanceof LegacyMSQSpec)) {
+      throw DruidException.defensive("Compaction is only supported for LegacyMSQSpec!");
+    }
+    LegacyMSQSpec legacyMSQSpec = (LegacyMSQSpec) msqSpec;
+    Query<?> query = legacyMSQSpec.getQuery();
+
+    List<AggregatorFactory> metricsSpec = Collections.emptyList();
+
+    if (query instanceof GroupByQuery) {
+      // For group-by queries, the aggregators are transformed to their combining factories in the dataschema, resulting
+      // in a mismatch between schema in compaction spec and the one in compaction state. Sourcing the original
+      // AggregatorFactory definition for aggregators in the dataSchema, therefore, directly from the querySpec.
+      GroupByQuery groupByQuery = (GroupByQuery) query;
+      // Collect all aggregators that are part of the current dataSchema, since a non-rollup query (isRollup() is false)
+      // moves metrics columns to dimensions in the final schema.
+      Set<String> aggregatorsInDataSchema = Arrays.stream(dataSchema.getAggregators())
+                                                  .map(AggregatorFactory::getName)
+                                                  .collect(Collectors.toSet());
+      metricsSpec = groupByQuery.getAggregatorSpecs()
+                                .stream()
+                                .filter(aggregatorFactory -> aggregatorsInDataSchema.contains(aggregatorFactory.getName()))
+                                .collect(Collectors.toList());
+    }
+    return metricsSpec;
   }
 
   @Override
@@ -449,12 +307,14 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     final TaskState taskStateForReport;
     final MSQErrorReport errorForReport;
 
+    mainThreadId.set(Thread.currentThread().getId());
+
     try {
       // Planning-related: convert the native query from MSQSpec into a multi-stage QueryDefinition.
       this.queryStartTime = DateTimes.nowUtc();
       context.registerController(this, closer);
 
-      queryDef = initializeQueryDefAndState(closer);
+      queryDef = initializeQueryDefAndState();
 
       this.netClient = closer.register(new ExceptionWrappingWorkerClient(context.newWorkerClient()));
       this.workerSketchFetcher = new WorkerSketchFetcher(
@@ -486,7 +346,7 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       exceptionEncountered = e;
     }
 
-    // Fetch final counters in separate try, in case runQueryUntilDone threw an exception.
+    // Fetch final counters in a separate try, in case runQueryUntilDone threw an exception.
     try {
       countersSnapshot = getFinalCountersSnapshot(queryKernel);
     }
@@ -588,21 +448,33 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
     );
   }
 
-  private QueryDefinition initializeQueryDefAndState(final Closer closer)
+  private QueryDefinition initializeQueryDefAndState()
   {
     this.selfDruidNode = context.selfNode();
-    this.queryKernelConfig = context.queryKernelConfig(queryId, querySpec);
+    this.queryKernelConfig = context.queryKernelConfig(querySpec);
 
     final QueryContext queryContext = querySpec.getContext();
-    QueryKitBasedMSQPlanner qkPlanner = new QueryKitBasedMSQPlanner(
-        context,
-        querySpec,
-        resultsContext,
-        queryKernelConfig,
-        queryId
-    );
 
-    final QueryDefinition queryDef = qkPlanner.makeQueryDefinition();
+    final QueryDefinition queryDef;
+    if (legacyQuery != null) {
+      QueryKitBasedMSQPlanner qkPlanner = new QueryKitBasedMSQPlanner(
+          querySpec,
+          resultsContext,
+          legacyQuery,
+          context.jsonMapper(),
+          queryKitSpecFactory.makeQueryKitSpec(
+              QueryKitBasedMSQPlanner.makeQueryControllerToolKit(querySpec.getContext(), context.jsonMapper()),
+              context.queryId(),
+              querySpec.getTuningConfig(),
+              querySpec.getContext()
+          )
+      );
+      queryDef = qkPlanner.makeQueryDefinition();
+    } else {
+      queryDef = ((QueryDefMSQSpec) querySpec).getQueryDef();
+    }
+
+    ensureExportLocationEmpty(context, querySpec.getDestination());
 
     if (log.isDebugEnabled()) {
       try {
@@ -718,9 +590,14 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
       );
     }
 
-    context.emitMetric("ingest/tombstones/count", numTombstones);
+    MSQMetriceEventBuilder metricBuilder = new MSQMetriceEventBuilder();
+
+    metricBuilder.setMetric("ingest/tombstones/count", numTombstones);
+    context.emitMetric(metricBuilder);
+
     // Include tombstones in the reported segments count
-    context.emitMetric("ingest/segments/count", segmentsWithTombstones.size());
+    metricBuilder.setMetric("ingest/segments/count", segmentsWithTombstones.size());
+    context.emitMetric(metricBuilder);
   }
 
   private TaskAction<SegmentPublishResult> createOverwriteAction(
@@ -785,8 +662,8 @@ public class ControllerImpl extends AbstractController<MSQControllerTask>
               queryDef.getQueryId()
           );
         } else {
-          DataSchema dataSchema = ((SegmentGeneratorFrameProcessorFactory) queryKernel
-              .getStageDefinition(finalStageId).getProcessorFactory()).getDataSchema();
+          DataSchema dataSchema = ((SegmentGeneratorStageProcessor) queryKernel
+              .getStageDefinition(finalStageId).getProcessor()).getDataSchema();
 
           ShardSpec shardSpec = segments.isEmpty() ? null : segments.stream().findFirst().get().getShardSpec();
           ClusterBy clusterBy = queryKernel.getStageDefinition(finalStageId).getClusterBy();

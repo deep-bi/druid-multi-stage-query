@@ -30,6 +30,7 @@ import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryRunner;
 import org.apache.druid.query.QuerySegmentWalker;
 import org.apache.druid.query.SegmentDescriptor;
+import org.apache.druid.query.policy.NoopPolicyEnforcer;
 import org.apache.druid.server.QueryLifecycleFactory;
 import org.apache.druid.server.QueryStackTests;
 import org.apache.druid.server.log.TestRequestLogger;
@@ -65,6 +66,7 @@ public class NativeMSQTestBase extends MSQTestBase
         new NoopServiceEmitter(),
         new TestRequestLogger(),
         new AuthConfig(),
+        NoopPolicyEnforcer.instance(),
         AuthTestUtils.TEST_AUTHORIZER_MAPPER,
         Suppliers.ofInstance(new DefaultQueryConfig(ImmutableMap.of()))
     );

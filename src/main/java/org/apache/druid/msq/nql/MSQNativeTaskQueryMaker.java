@@ -22,36 +22,29 @@ package org.apache.druid.msq.nql;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
 import org.apache.druid.common.guava.FutureUtils;
-import org.apache.druid.error.InvalidInput;
 import org.apache.druid.java.util.common.guava.Sequences;
 import org.apache.druid.msq.exec.MSQTasks;
+import org.apache.druid.msq.indexing.LegacyMSQSpec;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
-import org.apache.druid.msq.indexing.MSQSpec;
 import org.apache.druid.msq.indexing.MSQTuningConfig;
 import org.apache.druid.msq.indexing.destination.MSQDestination;
-import org.apache.druid.msq.sql.MSQMode;
 import org.apache.druid.msq.util.MultiStageQueryContext;
 import org.apache.druid.msq.util.TaskQueryMakerUtil;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContext;
-import org.apache.druid.query.QueryContexts;
 import org.apache.druid.rpc.indexing.OverlordClient;
 import org.apache.druid.segment.IndexSpec;
 import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.server.QueryResponse;
+import org.apache.druid.server.security.AuthenticationResult;
 import org.apache.druid.sql.calcite.planner.ColumnMappings;
-import org.apache.druid.sql.destination.ExportDestination;
-import org.apache.druid.sql.destination.IngestDestination;
 
-import javax.annotation.Nullable;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 
 public class MSQNativeTaskQueryMaker
 {
 
-  private final IngestDestination targetDataSource;
   private final OverlordClient overlordClient;
   private final ObjectMapper jsonMapper;
   private final ColumnMappings columnMappings;
@@ -59,14 +52,12 @@ public class MSQNativeTaskQueryMaker
 
 
   public MSQNativeTaskQueryMaker(
-      @Nullable final IngestDestination targetDataSource,
       final OverlordClient overlordClient,
       final ObjectMapper jsonMapper,
       final ColumnMappings columnMappings,
       final RowSignature signature
   )
   {
-    this.targetDataSource = targetDataSource;
     this.overlordClient = Preconditions.checkNotNull(overlordClient, "indexingServiceClient");
     this.jsonMapper = Preconditions.checkNotNull(jsonMapper, "jsonMapper");
     this.columnMappings = columnMappings;
@@ -74,62 +65,51 @@ public class MSQNativeTaskQueryMaker
   }
 
 
-  public QueryResponse<Object[]> runNativeQuery(final Query<?> baseQuery)
+  public QueryResponse<Object[]> runNativeQuery(
+      final Query<?> baseQuery,
+      final AuthenticationResult authenticationResult
+  )
   {
     String taskId = MSQTasks.controllerTaskId(baseQuery.getId());
     final QueryContext queryContext = baseQuery.context();
-    final Map<String, Object> nativeQueryContext = new HashMap<>(queryContext.asMap());
 
-    final String msqMode = MultiStageQueryContext.getMSQMode(queryContext);
-    if (msqMode != null) {
-      MSQMode.populateDefaultQueryContext(msqMode, nativeQueryContext);
-    }
-
-    final int maxNumTasks = MultiStageQueryContext.getMaxNumTasks(queryContext);
-
-    if (maxNumTasks < 2) {
-      throw InvalidInput.exception(
-          "MSQ context maxNumTasks [%,d] cannot be less than 2, since at least 1 controller and 1 worker is necessary",
-          maxNumTasks
-      );
-    }
-    final int maxNumWorkers = maxNumTasks - 1;
+    final int maxNumWorkers = TaskQueryMakerUtil.getMaxNumWorkers(queryContext);
     final int rowsPerSegment = MultiStageQueryContext.getRowsPerSegment(queryContext);
     final int maxRowsInMemory = MultiStageQueryContext.getRowsInMemory(queryContext);
     final IndexSpec indexSpec = MultiStageQueryContext.getIndexSpec(queryContext, jsonMapper);
-    final boolean finalizeAggregations = MultiStageQueryContext.isFinalizeAggregations(queryContext);
+    final MSQDestination destination = TaskQueryMakerUtil.selectDestination(queryContext); // no export or table destination supported
 
-    final MSQDestination destination;
+    final Map<String, Object> nativeQueryContextOverrides = buildOverrideContext(queryContext, authenticationResult);
 
-    if (targetDataSource instanceof ExportDestination) {
-      destination = TaskQueryMakerUtil.buildExportDestination((ExportDestination) targetDataSource, queryContext);
-    } else {
-      destination = TaskQueryMakerUtil.selectDestination(queryContext);
-    }
-    final Map<String, Object> nativeQueryContextOverrides = new HashMap<>();
-
-    // Add appropriate finalization to native query context.
-    nativeQueryContextOverrides.put(QueryContexts.FINALIZE_KEY, finalizeAggregations);
-
-    // This flag is to ensure backward compatibility, as brokers are upgraded after indexers/middlemanagers.
-    nativeQueryContextOverrides.put(MultiStageQueryContext.WINDOW_FUNCTION_OPERATOR_TRANSFORMATION, true);
-
-    final MSQSpec querySpec =
-        MSQSpec.builder()
-               .query(baseQuery.withOverriddenContext(nativeQueryContextOverrides))
-               .columnMappings(columnMappings)
-               .destination(destination)
-               .assignmentStrategy(MultiStageQueryContext.getAssignmentStrategy(queryContext))
-               .tuningConfig(new MSQTuningConfig(maxNumWorkers, maxRowsInMemory, rowsPerSegment, null, indexSpec))
-               .build();
+    final LegacyMSQSpec querySpec =
+        LegacyMSQSpec.builder()
+                     .query(baseQuery)
+                     .queryContext(queryContext.override(nativeQueryContextOverrides))
+                     .columnMappings(columnMappings)
+                     .destination(destination)
+                     .assignmentStrategy(MultiStageQueryContext.getAssignmentStrategy(queryContext))
+                     .tuningConfig(new MSQTuningConfig(maxNumWorkers, maxRowsInMemory, rowsPerSegment, null, indexSpec))
+                     .build();
 
     final MSQNativeControllerTask controllerTask = new MSQNativeControllerTask(
         taskId,
-        querySpec.withOverriddenContext(nativeQueryContext),
+        querySpec,
         null,
         signature
     );
     FutureUtils.getUnchecked(overlordClient.runTask(taskId, controllerTask), true);
     return QueryResponse.withEmptyContext(Sequences.simple(Collections.singletonList(new Object[]{taskId})));
+  }
+
+  private static Map<String, Object> buildOverrideContext(
+      final QueryContext queryContext,
+      final AuthenticationResult authenticationResult
+  )
+  {
+    return TaskQueryMakerUtil.buildOverrideContext(
+        queryContext,
+        authenticationResult.getIdentity(),
+        false
+    );
   }
 }
