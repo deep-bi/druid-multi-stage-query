@@ -424,10 +424,14 @@ public class NativeControllerImpl extends AbstractController<MSQNativeController
     this.netClient = new ExceptionWrappingWorkerClient(context.taskClientFor(this));
     closer.register(netClient::close);
 
+    final MSQSpec querySpecForPlanning = new NativeScanSignatureResolver(context).maybeAddScanSignature(
+        task.getQuerySpec()
+    );
+
     final QueryDefinition queryDef = makeQueryDefinition(
         id(),
         makeQueryControllerToolKit(),
-        task.getQuerySpec()
+        querySpecForPlanning
     );
 
     QueryValidator.validateQueryDef(queryDef);
