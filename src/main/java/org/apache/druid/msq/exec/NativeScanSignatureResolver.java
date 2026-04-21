@@ -65,8 +65,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Resolves scan query signatures using the same metadata-store / deep-storage-capable segment sources that MSQ planning
- * eventually relies on, rather than broker-side query execution.
+ * Resolves scan query signatures.
  */
 class NativeScanSignatureResolver
 {
