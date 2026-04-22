@@ -277,64 +277,14 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
   public void testNonLegacyScanQuery()
       throws JsonProcessingException // Legacy scan queries are unsupported by msq engine
   {
-    MockHttpServletRequest testServletRequest = new MockHttpServletRequest();
-
-    testServletRequest.setAttribute(AuthConfig.DRUID_AUTHENTICATION_RESULT, AUTHENTICATION_RESULT);
-    testServletRequest.contentType = CONTENT_TYPE_JSON;
-    Response response = doPost(SIMPLE_SCAN_QUERY, testServletRequest);
-    Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
-    String taskId = ((NativeStatementResult) response.getEntity()).getQueryId();
-
-    NativeStatementResult expected = new NativeStatementResult(taskId, StatementState.SUCCESS,
-                                                               MSQTestOverlordServiceClient.CREATED_TIME,
-                                                               ImmutableMap.of(),
-                                                               MSQTestOverlordServiceClient.DURATION,
-                                                               new ResultSetInformation(
-                                                                   6L,
-                                                                   316L,
-                                                                   null,
-                                                                   MSQControllerTask.DUMMY_DATASOURCE_FOR_SELECT,
-                                                                   getSimpleScanResults(),
-                                                                   ImmutableList.of(new PageInformation(0, 6L, 316L))
-                                                               ),
-                                                               null
-    );
-    Assert.assertEquals(
-        objectMapper.writeValueAsString(expected),
-        objectMapper.writeValueAsString(response.getEntity())
-    );
+    assertScanQueryReturnsExpected(SIMPLE_SCAN_QUERY);
   }
 
   @Test
   public void testNonLegacyScanQueryWithoutScanSignature()
       throws JsonProcessingException
   {
-    MockHttpServletRequest testServletRequest = new MockHttpServletRequest();
-
-    testServletRequest.setAttribute(AuthConfig.DRUID_AUTHENTICATION_RESULT, AUTHENTICATION_RESULT);
-    testServletRequest.contentType = CONTENT_TYPE_JSON;
-    Response response = doPost(SIMPLE_SCAN_QUERY_WITHOUT_SIGNATURE, testServletRequest);
-    Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
-    String taskId = ((NativeStatementResult) response.getEntity()).getQueryId();
-
-    NativeStatementResult expected = new NativeStatementResult(taskId, StatementState.SUCCESS,
-                                                               MSQTestOverlordServiceClient.CREATED_TIME,
-                                                               ImmutableMap.of(),
-                                                               MSQTestOverlordServiceClient.DURATION,
-                                                               new ResultSetInformation(
-                                                                   6L,
-                                                                   316L,
-                                                                   null,
-                                                                   MSQControllerTask.DUMMY_DATASOURCE_FOR_SELECT,
-                                                                   getSimpleScanResults(),
-                                                                   ImmutableList.of(new PageInformation(0, 6L, 316L))
-                                                               ),
-                                                               null
-    );
-    Assert.assertEquals(
-        objectMapper.writeValueAsString(expected),
-        objectMapper.writeValueAsString(response.getEntity())
-    );
+    assertScanQueryReturnsExpected(SIMPLE_SCAN_QUERY_WITHOUT_SIGNATURE);
   }
 
   @Test
@@ -582,6 +532,36 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
         ResultFormat.ARRAY.name(),
         SqlStatementResourceTest.makeOkRequest()
     )));
+  }
+
+  private void assertScanQueryReturnsExpected(final String queryJson) throws JsonProcessingException
+  {
+    MockHttpServletRequest testServletRequest = new MockHttpServletRequest();
+
+    testServletRequest.setAttribute(AuthConfig.DRUID_AUTHENTICATION_RESULT, AUTHENTICATION_RESULT);
+    testServletRequest.contentType = CONTENT_TYPE_JSON;
+    Response response = doPost(queryJson, testServletRequest);
+    Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    String taskId = ((NativeStatementResult) response.getEntity()).getQueryId();
+
+    NativeStatementResult expected = new NativeStatementResult(taskId, StatementState.SUCCESS,
+                                                               MSQTestOverlordServiceClient.CREATED_TIME,
+                                                               ImmutableMap.of(),
+                                                               MSQTestOverlordServiceClient.DURATION,
+                                                               new ResultSetInformation(
+                                                                   6L,
+                                                                   316L,
+                                                                   null,
+                                                                   MSQControllerTask.DUMMY_DATASOURCE_FOR_SELECT,
+                                                                   getSimpleScanResults(),
+                                                                   ImmutableList.of(new PageInformation(0, 6L, 316L))
+                                                               ),
+                                                               null
+    );
+    Assert.assertEquals(
+        objectMapper.writeValueAsString(expected),
+        objectMapper.writeValueAsString(response.getEntity())
+    );
   }
 
   private Response doPost(String simpleScanQuery, MockHttpServletRequest testServletRequest)

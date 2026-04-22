@@ -24,7 +24,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.Injector;
 import com.google.inject.Key;
-import org.apache.druid.client.ImmutableSegmentLoadInfo;
 import org.apache.druid.collections.ResourceHolder;
 import org.apache.druid.error.DruidException;
 import org.apache.druid.indexing.common.SegmentCacheManagerFactory;
@@ -357,14 +356,6 @@ class NativeScanSignatureResolver
 
     for (final DataSegment segment : publishedUsedSegments) {
       candidateSegments.put(segment.getId(), segment);
-    }
-
-    for (final ImmutableSegmentLoadInfo segmentLoadInfo : controllerContext.coordinatorClient()
-                                                                            .fetchServerViewSegments(
-                                                                                dataSource,
-                                                                                intervals
-                                                                            )) {
-      candidateSegments.putIfAbsent(segmentLoadInfo.getSegment().getId(), segmentLoadInfo.getSegment());
     }
   }
 
