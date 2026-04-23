@@ -43,6 +43,7 @@ import org.apache.druid.segment.QueryableIndex;
 import org.apache.druid.segment.QueryableIndexSegment;
 import org.apache.druid.segment.Segment;
 import org.apache.druid.segment.VirtualColumn;
+import org.apache.druid.segment.VirtualColumns;
 import org.apache.druid.segment.column.ColumnCapabilities;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
@@ -58,10 +59,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Resolves scan query signatures.
@@ -188,41 +191,41 @@ class NativeScanSignatureResolver
       final RowSignature dataSourceSignature
   )
   {
-    final RowSignature.Builder resolvedSignatureBuilder = RowSignature.builder().addAll(dataSourceSignature);
-    final List<String> unresolvedVirtualColumns = new ArrayList<>();
+    final VirtualColumns virtualColumns = scanQuery.getVirtualColumns();
+    final RowSignature.Builder builder = RowSignature.builder().addAll(dataSourceSignature);
 
-    for (final String column : outputColumns) {
-      if (scanQuery.getVirtualColumns().exists(column)) {
-        unresolvedVirtualColumns.add(column);
-      }
-    }
+    final List<String> pending = outputColumns.stream()
+                                              .filter(virtualColumns::exists)
+                                              .collect(Collectors.toCollection(ArrayList::new));
 
-    boolean progress = true;
-    while (!unresolvedVirtualColumns.isEmpty() && progress) {
+    boolean progress;
+
+    do {
       progress = false;
-      final RowSignature knownSignature = resolvedSignatureBuilder.build();
-      final List<String> newlyResolvedVirtualColumns = new ArrayList<>();
+      final RowSignature current = builder.build();
 
-      for (final String column : unresolvedVirtualColumns) {
-        final VirtualColumn virtualColumn = scanQuery.getVirtualColumns().getVirtualColumn(column);
-        if (virtualColumn == null) {
+      final Iterator<String> it = pending.iterator();
+      while (it.hasNext()) {
+        final String column = it.next();
+        final VirtualColumn vc = virtualColumns.getVirtualColumn(column);
+
+        if (vc == null) {
+          it.remove();
           continue;
         }
 
-        final ColumnCapabilities capabilities = virtualColumn.capabilities(knownSignature, column);
-        final ColumnType columnType = capabilities == null ? null : capabilities.toColumnType();
+        final ColumnCapabilities cap = vc.capabilities(current, column);
+        final ColumnType type = cap == null ? null : cap.toColumnType();
 
-        if (columnType != null) {
-          resolvedSignatureBuilder.add(column, columnType);
-          newlyResolvedVirtualColumns.add(column);
+        if (type != null) {
+          builder.add(column, type);
+          it.remove();
           progress = true;
         }
       }
+    } while (!pending.isEmpty() && progress);
 
-      unresolvedVirtualColumns.removeAll(newlyResolvedVirtualColumns);
-    }
-
-    return resolvedSignatureBuilder.build();
+    return builder.build();
   }
 
   private RowSignature getDataSourceSignature(
