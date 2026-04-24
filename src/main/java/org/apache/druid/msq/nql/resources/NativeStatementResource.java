@@ -20,6 +20,7 @@
 package org.apache.druid.msq.nql.resources;
 
 import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.joda.ser.DateTimeSerializer;
@@ -42,6 +43,7 @@ import org.apache.druid.java.util.common.guava.Yielder;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.AbstractStatementResource;
+import org.apache.druid.msq.exec.NativeScanSignatureResolver;
 import org.apache.druid.msq.guice.MultiStageQuery;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
@@ -190,7 +192,8 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
 
       contextChecks(context);
 
-      RowSignature signature = getRowSignature(query);
+      final Query<?> queryToRun = maybeAddScanSignature(query, authenticationResult);
+      final RowSignature signature = getRowSignature(queryToRun);
       MSQNativeTaskQueryMaker taskQueryMaker = new MSQNativeTaskQueryMaker(
           null,
           overlordClient,
@@ -199,7 +202,7 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
           signature
       );
 
-      QueryResponse<Object[]> response = taskQueryMaker.runNativeQuery(query);
+      QueryResponse<Object[]> response = taskQueryMaker.runNativeQuery(queryToRun);
       final Sequence<Object[]> sequence = response.getResults();
 
       return buildTaskResponse(sequence, authenticationResult);
@@ -387,6 +390,18 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
     lifecycle.initialize(query);
     QueryToolChest<?, Query<?>> toolChest = lifecycle.getToolChest();
     return toolChest.resultArraySignature(query);
+  }
+
+  private Query<?> maybeAddScanSignature(
+      final Query<?> query,
+      final AuthenticationResult authenticationResult
+  ) throws JsonProcessingException
+  {
+    return new NativeScanSignatureResolver(
+        jsonMapper,
+        lifecycleFactory,
+        authenticationResult
+    ).maybeAddScanSignature(query);
   }
 
   private ColumnMappings getColumnMappings(final RowSignature signature)

@@ -22,90 +22,80 @@ package org.apache.druid.msq.exec;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableMap;
-import com.google.inject.Injector;
-import com.google.inject.Key;
-import org.apache.druid.collections.ResourceHolder;
 import org.apache.druid.error.DruidException;
-import org.apache.druid.indexing.common.SegmentCacheManagerFactory;
-import org.apache.druid.indexing.common.actions.RetrieveUsedSegmentsAction;
-import org.apache.druid.java.util.common.FileUtils;
+import org.apache.druid.java.util.common.guava.Sequence;
+import org.apache.druid.java.util.common.guava.Yielder;
+import org.apache.druid.java.util.common.guava.Yielders;
 import org.apache.druid.java.util.common.logger.Logger;
-import org.apache.druid.msq.counters.ChannelCounters;
-import org.apache.druid.msq.indexing.MSQSpec;
-import org.apache.druid.msq.querykit.DataSegmentProvider;
 import org.apache.druid.query.InlineDataSource;
 import org.apache.druid.query.Query;
-import org.apache.druid.query.TableDataSource;
-import org.apache.druid.query.UnionDataSource;
+import org.apache.druid.query.QueryContexts;
+import org.apache.druid.query.metadata.metadata.AggregatorMergeStrategy;
+import org.apache.druid.query.metadata.metadata.ColumnAnalysis;
+import org.apache.druid.query.metadata.metadata.ListColumnIncluderator;
+import org.apache.druid.query.metadata.metadata.SegmentAnalysis;
+import org.apache.druid.query.metadata.metadata.SegmentMetadataQuery;
 import org.apache.druid.query.scan.ScanQuery;
-import org.apache.druid.segment.IndexIO;
-import org.apache.druid.segment.QueryableIndex;
-import org.apache.druid.segment.QueryableIndexSegment;
-import org.apache.druid.segment.Segment;
 import org.apache.druid.segment.VirtualColumn;
 import org.apache.druid.segment.VirtualColumns;
 import org.apache.druid.segment.column.ColumnCapabilities;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
-import org.apache.druid.segment.loading.SegmentCacheManager;
+import org.apache.druid.server.QueryLifecycle;
+import org.apache.druid.server.QueryLifecycleFactory;
+import org.apache.druid.server.security.Access;
+import org.apache.druid.server.security.AuthenticationResult;
 import org.apache.druid.sql.calcite.external.ExternalDataSource;
 import org.apache.druid.sql.calcite.rel.DruidQuery;
-import org.apache.druid.timeline.DataSegment;
-import org.apache.druid.timeline.SegmentId;
-import org.joda.time.Interval;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
+import java.util.EnumSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
  * Resolves scan query signatures.
  */
-class NativeScanSignatureResolver
+public class NativeScanSignatureResolver
 {
   private static final Logger log = new Logger(NativeScanSignatureResolver.class);
 
-  private final ControllerContext controllerContext;
   private final ObjectMapper jsonMapper;
+  private final QueryLifecycleFactory lifecycleFactory;
+  private final AuthenticationResult authenticationResult;
 
-  NativeScanSignatureResolver(final ControllerContext controllerContext)
+  public NativeScanSignatureResolver(
+      final ObjectMapper jsonMapper,
+      final QueryLifecycleFactory lifecycleFactory,
+      final AuthenticationResult authenticationResult
+  )
   {
-    this.controllerContext = controllerContext;
-    this.jsonMapper = controllerContext.jsonMapper();
+    this.jsonMapper = jsonMapper;
+    this.lifecycleFactory = lifecycleFactory;
+    this.authenticationResult = authenticationResult;
   }
 
-  public MSQSpec maybeAddScanSignature(final MSQSpec querySpec)
+  public Query<?> maybeAddScanSignature(final Query<?> query) throws JsonProcessingException
   {
-    final Query<?> query = querySpec.getQuery();
-    if (!(query instanceof ScanQuery)) {
-      return querySpec;
+    if (!(query instanceof ScanQuery) || query.context().get(DruidQuery.CTX_SCAN_SIGNATURE) != null) {
+      return query;
     }
 
     final ScanQuery scanQuery = (ScanQuery) query;
-    if (scanQuery.context().get(DruidQuery.CTX_SCAN_SIGNATURE) != null) {
-      return querySpec;
-    }
 
-    final RowSignature scanSignature = buildScanSignature(scanQuery);
-    try {
-      return querySpec.withOverriddenContext(
-          ImmutableMap.of(
-              DruidQuery.CTX_SCAN_SIGNATURE,
-              jsonMapper.writeValueAsString(scanSignature)
-          )
-      );
-    }
-    catch (JsonProcessingException e) {
-      throw DruidException.defensive().build(e, "Unable to serialize auto-generated scan signature");
-    }
+    return query.withOverriddenContext(getScanSignatureContextOverride(scanQuery));
+  }
+
+  private Map<String, Object> getScanSignatureContextOverride(final ScanQuery scanQuery)
+      throws JsonProcessingException
+  {
+    return ImmutableMap.of(
+        DruidQuery.CTX_SCAN_SIGNATURE,
+        jsonMapper.writeValueAsString(buildScanSignature(scanQuery))
+    );
   }
 
   private RowSignature buildScanSignature(final ScanQuery scanQuery)
@@ -230,7 +220,7 @@ class NativeScanSignatureResolver
 
   private RowSignature getDataSourceSignature(
       final ScanQuery scanQuery,
-      final List<String> unresolvedColumns
+      final List<String> requiredDataSourceColumns
   )
   {
     if (scanQuery.getDataSource() instanceof InlineDataSource) {
@@ -241,181 +231,7 @@ class NativeScanSignatureResolver
       return ((ExternalDataSource) scanQuery.getDataSource()).getSignature();
     }
 
-    if (scanQuery.getDataSource() instanceof TableDataSource) {
-      return getTableDataSourceSignature(
-          ImmutableMap.of(
-              ((TableDataSource) scanQuery.getDataSource()).getName(),
-              scanQuery.getQuerySegmentSpec().getIntervals()
-          ),
-          unresolvedColumns
-      );
-    }
-
-    if (scanQuery.getDataSource() instanceof UnionDataSource) {
-      final Map<String, List<Interval>> tablesAndIntervals = new LinkedHashMap<>();
-      for (final TableDataSource tableDataSource : ((UnionDataSource) scanQuery.getDataSource()).getDataSourcesAsTableDataSources()) {
-        tablesAndIntervals.put(tableDataSource.getName(), scanQuery.getQuerySegmentSpec().getIntervals());
-      }
-      return getTableDataSourceSignature(tablesAndIntervals, unresolvedColumns);
-    }
-
-    throw userScanSignatureException(
-        "Unable to auto-generate [%s] for dataSource type [%s]. Please provide [%s] in the query context.",
-        DruidQuery.CTX_SCAN_SIGNATURE,
-        scanQuery.getDataSource().getClass().getSimpleName(),
-        DruidQuery.CTX_SCAN_SIGNATURE
-    );
-  }
-
-  private RowSignature getTableDataSourceSignature(
-      final Map<String, List<Interval>> tablesAndIntervals,
-      final List<String> unresolvedColumns
-  )
-  {
-    final LinkedHashMap<SegmentId, DataSegment> candidateSegments = new LinkedHashMap<>();
-
-    for (final Map.Entry<String, List<Interval>> entry : tablesAndIntervals.entrySet()) {
-      addCandidateSegments(candidateSegments, entry.getKey(), entry.getValue());
-    }
-
-    if (candidateSegments.isEmpty()) {
-      throw userScanSignatureException(
-          "Unable to auto-generate [%s] because no matching segments were found. Please provide [%s] in the query context.",
-          DruidQuery.CTX_SCAN_SIGNATURE,
-          DruidQuery.CTX_SCAN_SIGNATURE
-      );
-    }
-
-    final RowSignature.Builder signatureBuilder = RowSignature.builder();
-    final List<String> remainingColumns = new ArrayList<>(unresolvedColumns);
-    Throwable lastLoadFailure = null;
-    boolean loadedAnySegment = false;
-
-    for (final DataSegment segment : candidateSegments.values()) {
-      final RowSignature segmentSignature;
-      try {
-        segmentSignature = loadSegmentSignature(segment);
-        loadedAnySegment = true;
-      }
-      catch (Exception e) {
-        lastLoadFailure = e;
-        log.warn(
-            e,
-            "Unable to inspect segment[%s] while auto-generating [%s]; trying another matching segment.",
-            segment.getId(),
-            DruidQuery.CTX_SCAN_SIGNATURE
-        );
-        continue;
-      }
-
-      final List<String> newlyResolvedColumns = new ArrayList<>();
-      for (final String column : remainingColumns) {
-        final Optional<ColumnType> type = segmentSignature.getColumnType(column);
-        if (type.isPresent()) {
-          signatureBuilder.add(column, type.get());
-          newlyResolvedColumns.add(column);
-        }
-      }
-
-      remainingColumns.removeAll(newlyResolvedColumns);
-      if (remainingColumns.isEmpty()) {
-        break;
-      }
-    }
-
-    if (!loadedAnySegment) {
-      throw DruidException.forPersona(DruidException.Persona.DEVELOPER)
-                          .ofCategory(DruidException.Category.RUNTIME_FAILURE)
-                          .build(
-                              lastLoadFailure,
-                              "Unable to auto-generate [%s] because matching segments could not be loaded.",
-                              DruidQuery.CTX_SCAN_SIGNATURE
-                          );
-    }
-
-    return signatureBuilder.build();
-  }
-
-  private void addCandidateSegments(
-      final LinkedHashMap<SegmentId, DataSegment> candidateSegments,
-      final String dataSource,
-      final List<Interval> intervals
-  )
-  {
-    final Collection<DataSegment> publishedUsedSegments;
-    try {
-      if (intervals.isEmpty()) {
-        publishedUsedSegments = Collections.emptyList();
-      } else {
-        publishedUsedSegments = controllerContext.taskActionClient().submit(
-            new RetrieveUsedSegmentsAction(dataSource, intervals)
-        );
-      }
-    }
-    catch (IOException e) {
-      throw DruidException.defensive()
-                          .build(e, "Unable to inspect matching segments for dataSource[%s].", dataSource);
-    }
-
-    for (final DataSegment segment : publishedUsedSegments) {
-      candidateSegments.put(segment.getId(), segment);
-    }
-  }
-
-  private RowSignature loadSegmentSignature(final DataSegment dataSegment) throws IOException
-  {
-    final Injector injector = controllerContext.injector();
-    if (injector.getExistingBinding(Key.get(DataSegmentProvider.class)) != null) {
-      final DataSegmentProvider dataSegmentProvider = injector.getInstance(DataSegmentProvider.class);
-      try (ResourceHolder<Segment> segmentHolder = dataSegmentProvider.fetchSegment(
-          dataSegment.getId(),
-          new ChannelCounters(),
-          false
-      ).get()) {
-        return segmentHolder.get().asStorageAdapter().getRowSignature();
-      }
-    }
-
-    final File temporaryDirectory = FileUtils.createTempDir("scan-signature");
-    final SegmentCacheManager segmentCacheManager = new SegmentCacheManagerFactory(jsonMapper).manufacturate(temporaryDirectory);
-    try {
-      if (!segmentCacheManager.reserve(dataSegment)) {
-        throw DruidException.defensive()
-                            .build("Could not reserve a local cache location for segment[%s].", dataSegment.getId());
-      }
-
-      final File segmentDirectory = segmentCacheManager.getSegmentFiles(dataSegment);
-      final IndexIO indexIO = injector.getInstance(IndexIO.class);
-
-      try (
-          QueryableIndex index = indexIO.loadIndex(segmentDirectory);
-          QueryableIndexSegment segment = new QueryableIndexSegment(index, dataSegment.getId())
-      ) {
-        return segment.asStorageAdapter().getRowSignature();
-      }
-      finally {
-        try {
-          segmentCacheManager.cleanup(dataSegment);
-        }
-        catch (Exception e) {
-          log.warn(e, "Unable to clean up local cache files for segment[%s].", dataSegment.getId());
-        }
-      }
-    }
-    catch (IOException e) {
-      throw e;
-    }
-    catch (Exception e) {
-      throw new IOException(e);
-    }
-    finally {
-      try {
-        FileUtils.deleteDirectory(temporaryDirectory);
-      }
-      catch (IOException e) {
-        log.warn(e, "Unable to delete temporary directory[%s] used for scan signature inference.", temporaryDirectory);
-      }
-    }
+    return getDataSourceSignatureFromSegmentMetadataQuery(scanQuery, requiredDataSourceColumns);
   }
 
   private static DruidException userScanSignatureException(final String format, final Object... arguments)
@@ -423,5 +239,78 @@ class NativeScanSignatureResolver
     return DruidException.forPersona(DruidException.Persona.USER)
                          .ofCategory(DruidException.Category.INVALID_INPUT)
                          .build(format, arguments);
+  }
+
+  private RowSignature getDataSourceSignatureFromSegmentMetadataQuery(
+      final ScanQuery scanQuery,
+      final List<String> requiredDataSourceColumns
+  )
+  {
+    final SegmentMetadataQuery segmentMetadataQuery = new SegmentMetadataQuery(
+        scanQuery.getDataSource(),
+        scanQuery.getQuerySegmentSpec(),
+        new ListColumnIncluderator(requiredDataSourceColumns),
+        true,
+        QueryContexts.override(
+            scanQuery.getContext(),
+            QueryContexts.BROKER_PARALLEL_MERGE_KEY,
+            false
+        ),
+        EnumSet.noneOf(SegmentMetadataQuery.AnalysisType.class),
+        false,
+        null,
+        AggregatorMergeStrategy.LENIENT
+    );
+
+    final QueryLifecycle lifecycle = lifecycleFactory.factorize();
+    final Sequence<SegmentAnalysis> sequence =
+        lifecycle.runSimple(segmentMetadataQuery, authenticationResult, Access.OK).getResults();
+    Yielder<SegmentAnalysis> yielder = Yielders.each(sequence);
+
+    try {
+      if (yielder.isDone()) {
+        throw userScanSignatureException(
+            "Unable to auto-generate [%s] because segment metadata query returned no results. "
+            + "Please provide [%s] in the query context.",
+            DruidQuery.CTX_SCAN_SIGNATURE,
+            DruidQuery.CTX_SCAN_SIGNATURE
+        );
+      }
+
+      return segmentAnalysisToRowSignature(yielder.get());
+    }
+    finally {
+      try {
+        yielder.close();
+      }
+      catch (IOException e) {
+        log.warn(e, "Unable to close segment metadata query results.");
+      }
+    }
+  }
+
+  public static RowSignature segmentAnalysisToRowSignature(final SegmentAnalysis analysis)
+  {
+    final RowSignature.Builder signatureBuilder = RowSignature.builder();
+
+    for (final Map.Entry<String, ColumnAnalysis> entry : analysis.getColumns().entrySet()) {
+      if (entry.getValue().isError()) {
+        log.warn(
+            "Scan signature generation hit a segment metadata analysis error for column [%s], selected type [%s]."
+            + " If this type is incorrect, provide [%s] manually in the query context. Error: %s",
+            entry.getKey(),
+            entry.getValue().getTypeSignature(),
+            DruidQuery.CTX_SCAN_SIGNATURE,
+            entry.getValue().getErrorMessage()
+        );
+      }
+
+      final ColumnType valueType = entry.getValue().getTypeSignature();
+      if (valueType != null) {
+        signatureBuilder.add(entry.getKey(), valueType);
+      }
+    }
+
+    return signatureBuilder.build();
   }
 }
