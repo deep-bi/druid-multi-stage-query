@@ -107,6 +107,26 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                       + "        \"maxNumTasks\": 2\n"
                                                       + "      }\n"
                                                       + "}";
+  private static final String SIMPLE_SCAN_QUERY_WITHOUT_SIGNATURE = "{\n"
+                                                                    + "    \"queryType\": \"scan\",\n"
+                                                                    + "    \"dataSource\": \"foo\",\n"
+                                                                    + "    \"granularity\": \"hour\",\n"
+                                                                    + "    \"resultFormat\":\"compactedList\",\n"
+                                                                    + "    \"legacy\":false,\n"
+                                                                    + "    \"intervals\": [\n"
+                                                                    + "      \"-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z\"\n"
+                                                                    + "    ],\n"
+                                                                    + "    \"columns\": [\n"
+                                                                    + "      \"cnt\",\n"
+                                                                    + "      \"dim1\"\n"
+                                                                    + "    ],\n"
+                                                                    + "    \"context\":\n"
+                                                                    + "      {\n"
+                                                                    + "        \"__user\": \"allowAll\",\n"
+                                                                    + "        \"executionMode\": \"ASYNC\",\n"
+                                                                    + "        \"maxNumTasks\": 2\n"
+                                                                    + "      }\n"
+                                                                    + "}";
   private static final String SIMPLE_SCAN_QUERY_WITH_DURABLE = "{\n"
                                                                + "    \"queryType\": \"scan\",\n"
                                                                + "    \"dataSource\": \"foo\",\n"
@@ -257,44 +277,14 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
   public void testNonLegacyScanQuery()
       throws JsonProcessingException // Legacy scan queries are unsupported by msq engine
   {
-    List<Object[]> results = ImmutableList.of(
-        new Object[]{1L, ""},
-        new Object[]{
-            1L,
-            "10.1"
-        },
-        new Object[]{1L, "2"},
-        new Object[]{1L, "1"},
-        new Object[]{1L, "def"},
-        new Object[]{1L, "abc"}
-    );
+    assertScanQueryReturnsExpected(SIMPLE_SCAN_QUERY);
+  }
 
-    MockHttpServletRequest testServletRequest = new MockHttpServletRequest();
-
-    testServletRequest.setAttribute(AuthConfig.DRUID_AUTHENTICATION_RESULT, AUTHENTICATION_RESULT);
-    testServletRequest.contentType = CONTENT_TYPE_JSON;
-    Response response = doPost(SIMPLE_SCAN_QUERY, testServletRequest);
-    Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
-    String taskId = ((NativeStatementResult) response.getEntity()).getQueryId();
-
-    NativeStatementResult expected = new NativeStatementResult(taskId, StatementState.SUCCESS,
-                                                               MSQTestOverlordServiceClient.CREATED_TIME,
-                                                               ImmutableMap.of(),
-                                                               MSQTestOverlordServiceClient.DURATION,
-                                                               new ResultSetInformation(
-                                                                   6L,
-                                                                   316L,
-                                                                   null,
-                                                                   MSQControllerTask.DUMMY_DATASOURCE_FOR_SELECT,
-                                                                   results,
-                                                                   ImmutableList.of(new PageInformation(0, 6L, 316L))
-                                                               ),
-                                                               null
-    );
-    Assert.assertEquals(
-        objectMapper.writeValueAsString(expected),
-        objectMapper.writeValueAsString(response.getEntity())
-    );
+  @Test
+  public void testNonLegacyScanQueryWithoutScanSignature()
+      throws JsonProcessingException
+  {
+    assertScanQueryReturnsExpected(SIMPLE_SCAN_QUERY_WITHOUT_SIGNATURE);
   }
 
   @Test
@@ -544,6 +534,36 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     )));
   }
 
+  private void assertScanQueryReturnsExpected(final String queryJson) throws JsonProcessingException
+  {
+    MockHttpServletRequest testServletRequest = new MockHttpServletRequest();
+
+    testServletRequest.setAttribute(AuthConfig.DRUID_AUTHENTICATION_RESULT, AUTHENTICATION_RESULT);
+    testServletRequest.contentType = CONTENT_TYPE_JSON;
+    Response response = doPost(queryJson, testServletRequest);
+    Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    String taskId = ((NativeStatementResult) response.getEntity()).getQueryId();
+
+    NativeStatementResult expected = new NativeStatementResult(taskId, StatementState.SUCCESS,
+                                                               MSQTestOverlordServiceClient.CREATED_TIME,
+                                                               ImmutableMap.of(),
+                                                               MSQTestOverlordServiceClient.DURATION,
+                                                               new ResultSetInformation(
+                                                                   6L,
+                                                                   316L,
+                                                                   null,
+                                                                   MSQControllerTask.DUMMY_DATASOURCE_FOR_SELECT,
+                                                                   getSimpleScanResults(),
+                                                                   ImmutableList.of(new PageInformation(0, 6L, 316L))
+                                                               ),
+                                                               null
+    );
+    Assert.assertEquals(
+        objectMapper.writeValueAsString(expected),
+        objectMapper.writeValueAsString(response.getEntity())
+    );
+  }
+
   private Response doPost(String simpleScanQuery, MockHttpServletRequest testServletRequest)
   {
     return doPost(
@@ -569,6 +589,19 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     Assert.assertEquals(expectedResult, new String(bytes, StandardCharsets.UTF_8));
   }
 
+  private static List<Object[]> getSimpleScanResults()
+  {
+    return ImmutableList.of(
+        new Object[]{1L, ""},
+        new Object[]{
+            1L,
+            "10.1"
+        },
+        new Object[]{1L, "2"},
+        new Object[]{1L, "1"},
+        new Object[]{1L, "def"},
+        new Object[]{1L, "abc"}
+    );
+  }
+
 }
-
-
