@@ -23,6 +23,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableMap;
 import org.apache.druid.error.DruidException;
+import org.apache.druid.java.util.common.Intervals;
 import org.apache.druid.java.util.common.guava.Sequence;
 import org.apache.druid.java.util.common.guava.Yielder;
 import org.apache.druid.java.util.common.guava.Yielders;
@@ -31,11 +32,14 @@ import org.apache.druid.query.InlineDataSource;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContexts;
 import org.apache.druid.query.metadata.metadata.AggregatorMergeStrategy;
+import org.apache.druid.query.metadata.metadata.AllColumnIncluderator;
 import org.apache.druid.query.metadata.metadata.ColumnAnalysis;
+import org.apache.druid.query.metadata.metadata.ColumnIncluderator;
 import org.apache.druid.query.metadata.metadata.ListColumnIncluderator;
 import org.apache.druid.query.metadata.metadata.SegmentAnalysis;
 import org.apache.druid.query.metadata.metadata.SegmentMetadataQuery;
 import org.apache.druid.query.scan.ScanQuery;
+import org.apache.druid.query.spec.MultipleIntervalSegmentSpec;
 import org.apache.druid.segment.VirtualColumn;
 import org.apache.druid.segment.VirtualColumns;
 import org.apache.druid.segment.column.ColumnCapabilities;
@@ -100,12 +104,13 @@ public class NativeScanSignatureResolver
 
   private RowSignature buildScanSignature(final ScanQuery scanQuery)
   {
-    final List<String> outputColumns = getOutputColumns(scanQuery);
+    final boolean hasExplicitColumns = hasExplicitColumns(scanQuery);
     final RowSignature dataSourceSignature = getDataSourceSignature(
         scanQuery,
-        getRequiredDataSourceColumns(scanQuery, outputColumns)
+        hasExplicitColumns ? getRequiredDataSourceColumns(scanQuery, scanQuery.getColumns()) : null
     );
 
+    final List<String> outputColumns = hasExplicitColumns ? scanQuery.getColumns() : getAllColumns(scanQuery, dataSourceSignature);
     final RowSignature allKnownSignature = buildCombinedSignature(scanQuery, outputColumns, dataSourceSignature);
     final RowSignature.Builder outputSignatureBuilder = RowSignature.builder();
 
@@ -126,16 +131,20 @@ public class NativeScanSignatureResolver
     return outputSignatureBuilder.build();
   }
 
-  private List<String> getOutputColumns(final ScanQuery scanQuery)
+  private boolean hasExplicitColumns(final ScanQuery scanQuery)
   {
     final List<String> columns = scanQuery.getColumns();
-    if (columns == null || columns.isEmpty()) {
-      throw userScanSignatureException(
-          "Unable to auto-generate [%s] for scan queries without explicit [columns]. "
-          + "Please provide [%s] in the query context.",
-          DruidQuery.CTX_SCAN_SIGNATURE,
-          DruidQuery.CTX_SCAN_SIGNATURE
-      );
+    return columns != null && !columns.isEmpty();
+  }
+
+  private List<String> getAllColumns(final ScanQuery scanQuery, final RowSignature dataSourceSignature)
+  {
+    final List<String> columns = new ArrayList<>(dataSourceSignature.getColumnNames());
+
+    for (final VirtualColumn virtualColumn : scanQuery.getVirtualColumns().getVirtualColumns()) {
+      if (!columns.contains(virtualColumn.getOutputName())) {
+        columns.add(virtualColumn.getOutputName());
+      }
     }
 
     return columns;
@@ -246,10 +255,13 @@ public class NativeScanSignatureResolver
       final List<String> requiredDataSourceColumns
   )
   {
+    final ColumnIncluderator columnsToInclude = requiredDataSourceColumns == null
+                                                ? new AllColumnIncluderator()
+                                                : new ListColumnIncluderator(requiredDataSourceColumns);
     final SegmentMetadataQuery segmentMetadataQuery = new SegmentMetadataQuery(
         scanQuery.getDataSource(),
         scanQuery.getQuerySegmentSpec(),
-        new ListColumnIncluderator(requiredDataSourceColumns),
+        columnsToInclude,
         true,
         QueryContexts.override(
             scanQuery.getContext(),
@@ -262,6 +274,34 @@ public class NativeScanSignatureResolver
         AggregatorMergeStrategy.LENIENT
     );
 
+    final RowSignature intervalSignature = runSegmentMetadataQuery(segmentMetadataQuery);
+
+    if (intervalSignature != null) {
+      return intervalSignature;
+    }
+
+    if (!Intervals.ONLY_ETERNITY.equals(segmentMetadataQuery.getIntervals())) {
+      final SegmentMetadataQuery fallbackSegmentMetadataQuery =
+          (SegmentMetadataQuery) segmentMetadataQuery.withQuerySegmentSpec(
+              new MultipleIntervalSegmentSpec(Intervals.ONLY_ETERNITY)
+          );
+      final RowSignature fallbackSignature = runSegmentMetadataQuery(fallbackSegmentMetadataQuery);
+
+      if (fallbackSignature != null) {
+        return fallbackSignature;
+      }
+    }
+
+    throw userScanSignatureException(
+        "Unable to auto-generate [%s] because segment metadata query returned no results. "
+        + "Please provide [%s] in the query context.",
+        DruidQuery.CTX_SCAN_SIGNATURE,
+        DruidQuery.CTX_SCAN_SIGNATURE
+    );
+  }
+
+  private RowSignature runSegmentMetadataQuery(final SegmentMetadataQuery segmentMetadataQuery)
+  {
     final QueryLifecycle lifecycle = lifecycleFactory.factorize();
     final Sequence<SegmentAnalysis> sequence =
         lifecycle.runSimple(segmentMetadataQuery, authenticationResult, Access.OK).getResults();
@@ -269,12 +309,7 @@ public class NativeScanSignatureResolver
 
     try {
       if (yielder.isDone()) {
-        throw userScanSignatureException(
-            "Unable to auto-generate [%s] because segment metadata query returned no results. "
-            + "Please provide [%s] in the query context.",
-            DruidQuery.CTX_SCAN_SIGNATURE,
-            DruidQuery.CTX_SCAN_SIGNATURE
-        );
+        return null;
       }
 
       return segmentAnalysisToRowSignature(yielder.get());
