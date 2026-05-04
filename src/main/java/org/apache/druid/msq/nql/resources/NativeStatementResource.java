@@ -43,7 +43,7 @@ import org.apache.druid.java.util.common.guava.Yielder;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.AbstractStatementResource;
-import org.apache.druid.msq.exec.NativeScanSignatureResolver;
+import org.apache.druid.msq.exec.NativeScanQueryNormalizer;
 import org.apache.druid.msq.guice.MultiStageQuery;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
@@ -59,6 +59,7 @@ import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.QueryContexts;
 import org.apache.druid.query.QueryException;
 import org.apache.druid.query.QueryToolChest;
+import org.apache.druid.query.scan.ScanQuery;
 import org.apache.druid.rpc.indexing.OverlordClient;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
@@ -192,7 +193,10 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
 
       contextChecks(context);
 
-      final Query<?> queryToRun = maybeAddScanSignature(query, authenticationResult);
+      final Query<?> queryToRun = query instanceof ScanQuery
+                                  ? normalizeScanQuery((ScanQuery) query, authenticationResult)
+                                  : query;
+
       final RowSignature signature = getRowSignature(queryToRun);
       MSQNativeTaskQueryMaker taskQueryMaker = new MSQNativeTaskQueryMaker(
           null,
@@ -392,16 +396,16 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
     return toolChest.resultArraySignature(query);
   }
 
-  private Query<?> maybeAddScanSignature(
-      final Query<?> query,
+  private ScanQuery normalizeScanQuery(
+      final ScanQuery query,
       final AuthenticationResult authenticationResult
   ) throws JsonProcessingException
   {
-    return new NativeScanSignatureResolver(
+    return new NativeScanQueryNormalizer(
         jsonMapper,
         lifecycleFactory,
         authenticationResult
-    ).maybeAddScanSignature(query);
+    ).normalize(query);
   }
 
   private ColumnMappings getColumnMappings(final RowSignature signature)

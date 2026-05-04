@@ -21,15 +21,14 @@ package org.apache.druid.msq.exec;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.collect.ImmutableMap;
 import org.apache.druid.error.DruidException;
 import org.apache.druid.java.util.common.Intervals;
 import org.apache.druid.java.util.common.guava.Sequence;
 import org.apache.druid.java.util.common.guava.Yielder;
 import org.apache.druid.java.util.common.guava.Yielders;
 import org.apache.druid.java.util.common.logger.Logger;
+import org.apache.druid.query.Druids;
 import org.apache.druid.query.InlineDataSource;
-import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryContexts;
 import org.apache.druid.query.metadata.metadata.AggregatorMergeStrategy;
 import org.apache.druid.query.metadata.metadata.AllColumnIncluderator;
@@ -61,17 +60,17 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Resolves scan query signatures.
+ * Normalizes scan queries for native MSQ execution.
  */
-public class NativeScanSignatureResolver
+public class NativeScanQueryNormalizer
 {
-  private static final Logger log = new Logger(NativeScanSignatureResolver.class);
+  private static final Logger log = new Logger(NativeScanQueryNormalizer.class);
 
   private final ObjectMapper jsonMapper;
   private final QueryLifecycleFactory lifecycleFactory;
   private final AuthenticationResult authenticationResult;
 
-  public NativeScanSignatureResolver(
+  public NativeScanQueryNormalizer(
       final ObjectMapper jsonMapper,
       final QueryLifecycleFactory lifecycleFactory,
       final AuthenticationResult authenticationResult
@@ -82,35 +81,41 @@ public class NativeScanSignatureResolver
     this.authenticationResult = authenticationResult;
   }
 
-  public Query<?> maybeAddScanSignature(final Query<?> query) throws JsonProcessingException
+  public ScanQuery normalize(final ScanQuery query) throws JsonProcessingException
   {
-    if (!(query instanceof ScanQuery) || query.context().get(DruidQuery.CTX_SCAN_SIGNATURE) != null) {
-      return query;
+    ScanQuery scanQuery = query;
+
+    if (!hasExplicitColumns(scanQuery)) {
+      scanQuery = withAllColumns(scanQuery);
     }
 
-    final ScanQuery scanQuery = (ScanQuery) query;
+    if (hasScanSignature(scanQuery)) {
+      return scanQuery;
+    }
 
-    return query.withOverriddenContext(getScanSignatureContextOverride(scanQuery));
+    final RowSignature scanSignature = buildScanSignature(scanQuery);
+    return Druids.ScanQueryBuilder.copy(scanQuery)
+                                  .context(QueryContexts.override(
+                                      scanQuery.getContext(),
+                                      DruidQuery.CTX_SCAN_SIGNATURE,
+                                      jsonMapper.writeValueAsString(scanSignature)
+                                  ))
+                                  .build();
   }
 
-  private Map<String, Object> getScanSignatureContextOverride(final ScanQuery scanQuery)
-      throws JsonProcessingException
+  private boolean hasScanSignature(final ScanQuery scanQuery)
   {
-    return ImmutableMap.of(
-        DruidQuery.CTX_SCAN_SIGNATURE,
-        jsonMapper.writeValueAsString(buildScanSignature(scanQuery))
-    );
+    return scanQuery.context().get(DruidQuery.CTX_SCAN_SIGNATURE) != null;
   }
 
   private RowSignature buildScanSignature(final ScanQuery scanQuery)
   {
-    final boolean hasExplicitColumns = hasExplicitColumns(scanQuery);
     final RowSignature dataSourceSignature = getDataSourceSignature(
         scanQuery,
-        hasExplicitColumns ? getRequiredDataSourceColumns(scanQuery, scanQuery.getColumns()) : null
+        getRequiredDataSourceColumns(scanQuery, scanQuery.getColumns())
     );
 
-    final List<String> outputColumns = hasExplicitColumns ? scanQuery.getColumns() : getAllColumns(scanQuery, dataSourceSignature);
+    final List<String> outputColumns = scanQuery.getColumns();
     final RowSignature allKnownSignature = buildCombinedSignature(scanQuery, outputColumns, dataSourceSignature);
     final RowSignature.Builder outputSignatureBuilder = RowSignature.builder();
 
@@ -135,6 +140,14 @@ public class NativeScanSignatureResolver
   {
     final List<String> columns = scanQuery.getColumns();
     return columns != null && !columns.isEmpty();
+  }
+
+  private ScanQuery withAllColumns(final ScanQuery scanQuery)
+  {
+    final RowSignature dataSourceSignature = getDataSourceSignature(scanQuery, null);
+    return Druids.ScanQueryBuilder.copy(scanQuery)
+                                  .columns(getAllColumns(scanQuery, dataSourceSignature))
+                                  .build();
   }
 
   private List<String> getAllColumns(final ScanQuery scanQuery, final RowSignature dataSourceSignature)

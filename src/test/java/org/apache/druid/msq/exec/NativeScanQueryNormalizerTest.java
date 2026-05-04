@@ -68,7 +68,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-public class NativeScanSignatureResolverTest
+public class NativeScanQueryNormalizerTest
 {
   private static final ObjectMapper JSON_MAPPER = new DefaultObjectMapper();
   private static final AuthenticationResult AUTHENTICATION_RESULT =
@@ -84,7 +84,7 @@ public class NativeScanSignatureResolverTest
   @Test
   public void testEmptyColumnsUseAllSegmentColumnsAndVirtualColumns() throws Exception
   {
-    final NativeScanSignatureResolver resolver = new NativeScanSignatureResolver(
+    final NativeScanQueryNormalizer normalizer = new NativeScanQueryNormalizer(
         JSON_MAPPER,
         createLifecycleFactory((query, intervals) -> Sequences.simple(Collections.singletonList(segmentAnalysis()))),
         AUTHENTICATION_RESULT
@@ -105,7 +105,7 @@ public class NativeScanSignatureResolverTest
                                   .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                                   .build();
 
-    final Query<?> queryWithSignature = resolver.maybeAddScanSignature(query);
+    final Query<?> queryWithSignature = normalizer.normalize(query);
 
     Assert.assertEquals(
         RowSignature.builder()
@@ -117,15 +117,14 @@ public class NativeScanSignatureResolverTest
         readScanSignature(queryWithSignature)
     );
     final List<String> columns = ((ScanQuery) queryWithSignature).getColumns();
-    Assert.assertNotNull(columns);
-    Assert.assertTrue(columns.isEmpty());
+    Assert.assertEquals(ImmutableList.of("__time", "cnt", "dim1", "v0"), columns);
   }
 
   @Test
   public void testFallsBackToEternityMetadataWhenIntervalHasNoSegments() throws Exception
   {
     final List<SegmentMetadataQuery> metadataQueries = new ArrayList<>();
-    final NativeScanSignatureResolver resolver = new NativeScanSignatureResolver(
+    final NativeScanQueryNormalizer normalizer = new NativeScanQueryNormalizer(
         JSON_MAPPER,
         createLifecycleFactory(
             (query, intervals) -> {
@@ -148,7 +147,7 @@ public class NativeScanSignatureResolverTest
                                   .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                                   .build();
 
-    final Query<?> queryWithSignature = resolver.maybeAddScanSignature(query);
+    final Query<?> queryWithSignature = normalizer.normalize(query);
 
     Assert.assertEquals(
         RowSignature.builder()
@@ -157,6 +156,7 @@ public class NativeScanSignatureResolverTest
                     .build(),
         readScanSignature(queryWithSignature)
     );
+    Assert.assertEquals(ImmutableList.of("cnt", "dim1"), ((ScanQuery) queryWithSignature).getColumns());
 
     Assert.assertEquals(2, metadataQueries.size());
     Assert.assertEquals(ImmutableList.of(Intervals.of("2000/2001")), metadataQueries.get(0).getIntervals());
@@ -166,10 +166,45 @@ public class NativeScanSignatureResolverTest
   }
 
   @Test
+  public void testExistingScanSignatureIsNotRegenerated() throws Exception
+  {
+    final NativeScanQueryNormalizer normalizer = new NativeScanQueryNormalizer(
+        JSON_MAPPER,
+        createLifecycleFactory(
+            (query, intervals) -> {
+              Assert.fail("scanSignature should not be generated when it is already present");
+              return Sequences.empty();
+            }
+        ),
+        AUTHENTICATION_RESULT
+    );
+    final RowSignature providedSignature = RowSignature.builder()
+                                                       .add("cnt", ColumnType.LONG)
+                                                       .add("dim1", ColumnType.STRING)
+                                                       .build();
+
+    final ScanQuery query = Druids.newScanQueryBuilder()
+                                  .dataSource("foo")
+                                  .intervals(intervals("2000/2001"))
+                                  .columns("cnt", "dim1")
+                                  .context(ImmutableMap.of(
+                                      DruidQuery.CTX_SCAN_SIGNATURE,
+                                      JSON_MAPPER.writeValueAsString(providedSignature)
+                                  ))
+                                  .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
+                                  .build();
+
+    final Query<?> normalizedQuery = normalizer.normalize(query);
+
+    Assert.assertEquals(providedSignature, readScanSignature(normalizedQuery));
+    Assert.assertEquals(ImmutableList.of("cnt", "dim1"), ((ScanQuery) normalizedQuery).getColumns());
+  }
+
+  @Test
   public void testEmptyColumnsMetadataQueryIncludesAllColumns() throws Exception
   {
     final List<SegmentMetadataQuery> metadataQueries = new ArrayList<>();
-    final NativeScanSignatureResolver resolver = new NativeScanSignatureResolver(
+    final NativeScanQueryNormalizer normalizer = new NativeScanQueryNormalizer(
         JSON_MAPPER,
         createLifecycleFactory(
             (query, intervals) -> {
@@ -187,10 +222,11 @@ public class NativeScanSignatureResolverTest
                                   .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
                                   .build();
 
-    resolver.maybeAddScanSignature(query);
+    normalizer.normalize(query);
 
-    Assert.assertEquals(1, metadataQueries.size());
+    Assert.assertEquals(2, metadataQueries.size());
     Assert.assertTrue(metadataQueries.get(0).getToInclude() instanceof AllColumnIncluderator);
+    Assert.assertTrue(metadataQueries.get(1).getToInclude() instanceof ListColumnIncluderator);
   }
 
   private static RowSignature readScanSignature(final Query<?> query) throws Exception
