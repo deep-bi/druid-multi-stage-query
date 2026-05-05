@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import org.apache.druid.msq.indexing.MSQControllerTask;
+import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.nql.resources.NativeStatementResource;
 import org.apache.druid.msq.sql.StatementState;
 import org.apache.druid.msq.sql.entity.PageInformation;
@@ -31,10 +32,13 @@ import org.apache.druid.msq.sql.entity.ResultSetInformation;
 import org.apache.druid.msq.sql.resources.SqlStatementResourceTest;
 import org.apache.druid.msq.test.MSQTestFileUtils;
 import org.apache.druid.msq.test.MSQTestOverlordServiceClient;
+import org.apache.druid.query.scan.ScanQuery;
 import org.apache.druid.segment.column.ColumnType;
+import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.server.mocks.MockHttpServletRequest;
 import org.apache.druid.server.security.AuthConfig;
 import org.apache.druid.server.security.AuthenticationResult;
+import org.apache.druid.sql.calcite.rel.DruidQuery;
 import org.apache.druid.sql.http.ResultFormat;
 import org.apache.druid.storage.NilStorageConnector;
 import org.junit.Assert;
@@ -120,6 +124,23 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                                     + "      \"cnt\",\n"
                                                                     + "      \"dim1\"\n"
                                                                     + "    ],\n"
+                                                                    + "    \"context\":\n"
+                                                                    + "      {\n"
+                                                                    + "        \"__user\": \"allowAll\",\n"
+                                                                    + "        \"executionMode\": \"ASYNC\",\n"
+                                                                    + "        \"maxNumTasks\": 2\n"
+                                                                    + "      }\n"
+                                                                    + "}";
+  private static final String SIMPLE_SCAN_QUERY_WITH_EMPTY_COLUMNS = "{\n"
+                                                                    + "    \"queryType\": \"scan\",\n"
+                                                                    + "    \"dataSource\": \"foo\",\n"
+                                                                    + "    \"granularity\": \"hour\",\n"
+                                                                    + "    \"resultFormat\":\"compactedList\",\n"
+                                                                    + "    \"legacy\":false,\n"
+                                                                    + "    \"intervals\": [\n"
+                                                                    + "      \"-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z\"\n"
+                                                                    + "    ],\n"
+                                                                    + "    \"columns\": [],\n"
                                                                     + "    \"context\":\n"
                                                                     + "      {\n"
                                                                     + "        \"__user\": \"allowAll\",\n"
@@ -285,6 +306,24 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
       throws JsonProcessingException
   {
     assertScanQueryReturnsExpected(SIMPLE_SCAN_QUERY_WITHOUT_SIGNATURE);
+  }
+
+  @Test
+  public void testNonLegacyScanQueryWithEmptyColumnsNormalizesSubmittedTask()
+      throws Exception
+  {
+    final String taskId = assertScanQueryReturnsExpected(SIMPLE_SCAN_QUERY_WITH_EMPTY_COLUMNS);
+    final ScanQuery submittedQuery = readSubmittedScanQuery(taskId);
+
+    final RowSignature expectedScanSignature = RowSignature.builder()
+                                                           .add("cnt", ColumnType.LONG)
+                                                           .add("dim1", ColumnType.STRING)
+                                                           .build();
+    Assert.assertEquals(ImmutableList.of("cnt", "dim1"), submittedQuery.getColumns());
+    Assert.assertEquals(
+        expectedScanSignature,
+        objectMapper.readValue(submittedQuery.context().getString(DruidQuery.CTX_SCAN_SIGNATURE), RowSignature.class)
+    );
   }
 
   @Test
@@ -534,7 +573,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     )));
   }
 
-  private void assertScanQueryReturnsExpected(final String queryJson) throws JsonProcessingException
+  private String assertScanQueryReturnsExpected(final String queryJson) throws JsonProcessingException
   {
     MockHttpServletRequest testServletRequest = new MockHttpServletRequest();
 
@@ -562,6 +601,15 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
         objectMapper.writeValueAsString(expected),
         objectMapper.writeValueAsString(response.getEntity())
     );
+    return taskId;
+  }
+
+  private ScanQuery readSubmittedScanQuery(final String taskId) throws Exception
+  {
+    return (ScanQuery) ((MSQNativeControllerTask) indexingNativeServiceClient.taskPayload(taskId)
+                                                                            .get()
+                                                                            .getPayload()).getQuerySpec()
+                                                                                         .getQuery();
   }
 
   private Response doPost(String simpleScanQuery, MockHttpServletRequest testServletRequest)
