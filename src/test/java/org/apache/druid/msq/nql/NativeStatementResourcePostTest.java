@@ -25,6 +25,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import org.apache.druid.error.DruidException;
 import org.apache.druid.msq.indexing.MSQControllerTask;
+import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.error.QueryNotSupportedFault;
 import org.apache.druid.msq.nql.resources.NativeStatementResource;
 import org.apache.druid.msq.sql.StatementState;
@@ -32,10 +33,13 @@ import org.apache.druid.msq.sql.entity.PageInformation;
 import org.apache.druid.msq.sql.entity.ResultSetInformation;
 import org.apache.druid.msq.sql.resources.SqlStatementResourceTest;
 import org.apache.druid.msq.test.MSQTestOverlordServiceClient;
+import org.apache.druid.query.scan.ScanQuery;
 import org.apache.druid.segment.column.ColumnType;
+import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.server.mocks.MockHttpServletRequest;
 import org.apache.druid.server.security.AuthConfig;
 import org.apache.druid.server.security.AuthenticationResult;
+import org.apache.druid.sql.calcite.rel.DruidQuery;
 import org.apache.druid.sql.http.ResultFormat;
 import org.apache.druid.storage.NilStorageConnector;
 import org.junit.jupiter.api.Assertions;
@@ -108,6 +112,43 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                       + "        \"maxNumTasks\": 2\n"
                                                       + "      }\n"
                                                       + "}";
+  private static final String SIMPLE_SCAN_QUERY_WITHOUT_SIGNATURE = "{\n"
+                                                                    + "    \"queryType\": \"scan\",\n"
+                                                                    + "    \"dataSource\": \"foo\",\n"
+                                                                    + "    \"granularity\": \"hour\",\n"
+                                                                    + "    \"resultFormat\":\"compactedList\",\n"
+                                                                    + "    \"legacy\":false,\n"
+                                                                    + "    \"intervals\": [\n"
+                                                                    + "      \"-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z\"\n"
+                                                                    + "    ],\n"
+                                                                    + "    \"columns\": [\n"
+                                                                    + "      \"cnt\",\n"
+                                                                    + "      \"dim1\"\n"
+                                                                    + "    ],\n"
+                                                                    + "    \"context\":\n"
+                                                                    + "      {\n"
+                                                                    + "        \"__user\": \"allowAll\",\n"
+                                                                    + "        \"executionMode\": \"ASYNC\",\n"
+                                                                    + "        \"maxNumTasks\": 2\n"
+                                                                    + "      }\n"
+                                                                    + "}";
+  private static final String SIMPLE_SCAN_QUERY_WITH_EMPTY_COLUMNS = "{\n"
+                                                                    + "    \"queryType\": \"scan\",\n"
+                                                                    + "    \"dataSource\": \"foo\",\n"
+                                                                    + "    \"granularity\": \"hour\",\n"
+                                                                    + "    \"resultFormat\":\"compactedList\",\n"
+                                                                    + "    \"legacy\":false,\n"
+                                                                    + "    \"intervals\": [\n"
+                                                                    + "      \"-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z\"\n"
+                                                                    + "    ],\n"
+                                                                    + "    \"columns\": [],\n"
+                                                                    + "    \"context\":\n"
+                                                                    + "      {\n"
+                                                                    + "        \"__user\": \"allowAll\",\n"
+                                                                    + "        \"executionMode\": \"ASYNC\",\n"
+                                                                    + "        \"maxNumTasks\": 2\n"
+                                                                    + "      }\n"
+                                                                    + "}";
   private static final String SIMPLE_SCAN_QUERY_WITH_DURABLE = "{\n"
                                                                + "    \"queryType\": \"scan\",\n"
                                                                + "    \"dataSource\": \"foo\",\n"
@@ -270,46 +311,31 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
   public void testNonLegacyScanQuery()
       throws JsonProcessingException // Legacy scan queries are unsupported by msq engine
   {
-    List<Object[]> results = ImmutableList.of(
-        new Object[]{1L, ""},
-        new Object[]{
-            1L,
-            "10.1"
-        },
-        new Object[]{1L, "2"},
-        new Object[]{1L, "1"},
-        new Object[]{1L, "def"},
-        new Object[]{1L, "abc"}
-    );
+    assertScanQueryReturnsExpected(SIMPLE_SCAN_QUERY);
+  }
 
-    MockHttpServletRequest testServletRequest = new MockHttpServletRequest();
+  @Test
+  public void testNonLegacyScanQueryWithoutScanSignature()
+      throws JsonProcessingException
+  {
+    assertScanQueryReturnsExpected(SIMPLE_SCAN_QUERY_WITHOUT_SIGNATURE);
+  }
 
-    testServletRequest.setAttribute(AuthConfig.DRUID_AUTHENTICATION_RESULT, AUTHENTICATION_RESULT);
-    testServletRequest.contentType = CONTENT_TYPE_JSON;
-    Response response = doPost(SIMPLE_SCAN_QUERY, testServletRequest);
-    Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
-    String taskId = ((NativeStatementResult) response.getEntity()).getQueryId();
+  @Test
+  public void testNonLegacyScanQueryWithEmptyColumnsNormalizesSubmittedTask()
+      throws Exception
+  {
+    final String taskId = assertScanQueryReturnsExpected(SIMPLE_SCAN_QUERY_WITH_EMPTY_COLUMNS);
+    final ScanQuery submittedQuery = readSubmittedScanQuery(taskId);
 
-    NativeStatementResult expected = new NativeStatementResult(taskId, StatementState.SUCCESS,
-                                                               MSQTestOverlordServiceClient.CREATED_TIME,
-                                                               ImmutableMap.of("cnt",
-                                                                               ColumnType.LONG, "dim1",
-                                                                               ColumnType.STRING
-                                                               ),
-                                                               MSQTestOverlordServiceClient.DURATION,
-                                                               new ResultSetInformation(
-                                                                   6L,
-                                                                   316L,
-                                                                   null,
-                                                                   MSQControllerTask.DUMMY_DATASOURCE_FOR_SELECT,
-                                                                   results,
-                                                                   ImmutableList.of(new PageInformation(0, 6L, 316L))
-                                                               ),
-                                                               null
-    );
+    final RowSignature expectedScanSignature = RowSignature.builder()
+                                                           .add("cnt", ColumnType.LONG)
+                                                           .add("dim1", ColumnType.STRING)
+                                                           .build();
+    Assertions.assertEquals(ImmutableList.of("cnt", "dim1"), submittedQuery.getColumns());
     Assertions.assertEquals(
-        objectMapper.writeValueAsString(expected),
-        objectMapper.writeValueAsString(response.getEntity())
+        expectedScanSignature,
+        objectMapper.readValue(submittedQuery.context().getString(DruidQuery.CTX_SCAN_SIGNATURE), RowSignature.class)
     );
   }
 
@@ -590,6 +616,45 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     Assertions.assertEquals(TIMESERIES_NOT_SUPPORTED_MSG, exception.getMessage());
   }
 
+  private String assertScanQueryReturnsExpected(final String queryJson) throws JsonProcessingException
+  {
+    MockHttpServletRequest testServletRequest = new MockHttpServletRequest();
+
+    testServletRequest.setAttribute(AuthConfig.DRUID_AUTHENTICATION_RESULT, AUTHENTICATION_RESULT);
+    testServletRequest.contentType = CONTENT_TYPE_JSON;
+    Response response = doPost(queryJson, testServletRequest);
+    Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+    String taskId = ((NativeStatementResult) response.getEntity()).getQueryId();
+
+    NativeStatementResult expected = new NativeStatementResult(taskId, StatementState.SUCCESS,
+                                                               MSQTestOverlordServiceClient.CREATED_TIME,
+                                                               ImmutableMap.of(),
+                                                               MSQTestOverlordServiceClient.DURATION,
+                                                               new ResultSetInformation(
+                                                                   6L,
+                                                                   316L,
+                                                                   null,
+                                                                   MSQControllerTask.DUMMY_DATASOURCE_FOR_SELECT,
+                                                                   getSimpleScanResults(),
+                                                                   ImmutableList.of(new PageInformation(0, 6L, 316L))
+                                                               ),
+                                                               null
+    );
+    Assertions.assertEquals(
+        objectMapper.writeValueAsString(expected),
+        objectMapper.writeValueAsString(response.getEntity())
+    );
+    return taskId;
+  }
+
+  private ScanQuery readSubmittedScanQuery(final String taskId) throws Exception
+  {
+    return (ScanQuery) ((MSQNativeControllerTask) indexingNativeServiceClient.taskPayload(taskId)
+                                                                            .get()
+                                                                            .getPayload()).getQuerySpec()
+                                                                                         .getQuery();
+  }
+
   private Response doPost(String simpleScanQuery, MockHttpServletRequest testServletRequest)
   {
     return doPost(
@@ -615,6 +680,19 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     Assertions.assertEquals(expectedResult, new String(bytes, StandardCharsets.UTF_8));
   }
 
+  private static List<Object[]> getSimpleScanResults()
+  {
+    return ImmutableList.of(
+        new Object[]{1L, ""},
+        new Object[]{
+            1L,
+            "10.1"
+        },
+        new Object[]{1L, "2"},
+        new Object[]{1L, "1"},
+        new Object[]{1L, "def"},
+        new Object[]{1L, "abc"}
+    );
+  }
+
 }
-
-

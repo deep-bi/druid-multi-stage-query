@@ -21,6 +21,7 @@ package org.apache.druid.msq.nql;
 
 import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableMap;
+import org.apache.druid.java.util.common.guava.Sequence;
 import org.apache.druid.java.util.common.guava.Sequences;
 import org.apache.druid.msq.test.MSQTestBase;
 import org.apache.druid.query.DefaultGenericQueryMetricsFactory;
@@ -34,16 +35,25 @@ import org.apache.druid.query.QueryToolChestWarehouse;
 import org.apache.druid.query.SegmentDescriptor;
 import org.apache.druid.query.groupby.GroupByQuery;
 import org.apache.druid.query.groupby.GroupByQueryQueryToolChest;
+import org.apache.druid.query.metadata.SegmentMetadataQueryConfig;
+import org.apache.druid.query.metadata.SegmentMetadataQueryQueryToolChest;
+import org.apache.druid.query.metadata.metadata.ColumnAnalysis;
+import org.apache.druid.query.metadata.metadata.SegmentAnalysis;
+import org.apache.druid.query.metadata.metadata.SegmentMetadataQuery;
 import org.apache.druid.query.scan.ScanQuery;
 import org.apache.druid.query.scan.ScanQueryQueryToolChest;
 import org.apache.druid.query.timeseries.TimeseriesQuery;
 import org.apache.druid.query.timeseries.TimeseriesQueryQueryToolChest;
+import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.server.QueryLifecycleFactory;
 import org.apache.druid.server.log.TestRequestLogger;
 import org.apache.druid.server.metrics.NoopServiceEmitter;
 import org.apache.druid.server.security.AuthConfig;
 import org.apache.druid.server.security.AuthTestUtils;
 import org.joda.time.Interval;
+
+import java.util.Collections;
+import java.util.LinkedHashMap;
 
 public class NativeMSQTestBase extends MSQTestBase
 {
@@ -68,12 +78,23 @@ public class NativeMSQTestBase extends MSQTestBase
                                                                                                             new TimeseriesQueryQueryToolChest(
                                                                                                             )
                                                                                                         )
+                                                                                                        .put(
+                                                                                                            SegmentMetadataQuery.class,
+                                                                                                            new SegmentMetadataQueryQueryToolChest(
+                                                                                                                new SegmentMetadataQueryConfig()
+                                                                                                            )
+                                                                                                        )
                                                                                                         .build());
   protected static final QuerySegmentWalker TEST_SEGMENT_WALKER = new QuerySegmentWalker()
   {
     @Override
     public <T> QueryRunner<T> getQueryRunnerForIntervals(Query<T> query, Iterable<Interval> intervals)
     {
+      if (query instanceof SegmentMetadataQuery) {
+        return (queryPlus, responseContext) -> (Sequence<T>) Sequences.simple(
+            Collections.singletonList(segmentAnalysis())
+        );
+      }
       return (queryPlus, responseContext) -> Sequences.empty();
     }
 
@@ -83,6 +104,25 @@ public class NativeMSQTestBase extends MSQTestBase
       return getQueryRunnerForIntervals(null, null);
     }
   };
+
+  private static SegmentAnalysis segmentAnalysis()
+  {
+    final LinkedHashMap<String, ColumnAnalysis> columns = new LinkedHashMap<>();
+    columns.put("cnt", ColumnAnalysis.builder().withType(ColumnType.LONG).withSize(0).build());
+    columns.put("dim1", ColumnAnalysis.builder().withType(ColumnType.STRING).withSize(0).build());
+
+    return new SegmentAnalysis(
+        "test",
+        null,
+        columns,
+        0,
+        0,
+        null,
+        null,
+        null,
+        null
+    );
+  }
 
   protected QueryLifecycleFactory createLifecycleFactory()
   {
