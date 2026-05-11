@@ -116,13 +116,12 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
                                                   + "      \"alias\",\n"
                                                   + "      \"market\"\n"
                                                   + "    ],\n"
+                                                  + "    \"columnTypes\": [\"LONG\", \"STRING\", \"STRING\"],\n"
                                                   + "    \"context\":\n"
                                                   + "      {\n"
                                                   + "        \"__user\": \"allowAll\",\n"
                                                   + "        \"executionMode\": \"ASYNC\",\n"
-                                                  + "        \"maxNumTasks\": 2,\n"
-                                                  + "        \"scanSignature\": \"[{\\\"name\\\":\\\"__time\\\",\\\"type\\\":\\\"LONG\\\"},"
-                                                  + "{\\\"name\\\":\\\"alias\\\",\\\"type\\\":\\\"STRING\\\"}, {\\\"name\\\":\\\"market\\\",\\\"type\\\":\\\"STRING\\\"}]\"\n"
+                                                  + "        \"maxNumTasks\": 2\n"
                                                   + "      }\n"
                                                   + "}";
   private static final RowSignature ROW_SIGNATURE = RowSignature.builder()
@@ -307,6 +306,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         objectMapper,
         smileMapper,
         overlordClient,
+        createCoordinatorClient(),
         createLifecycleFactory(),
         authorizerMapper,
         new LocalFileStorageConnector(newTempFolder("local"))

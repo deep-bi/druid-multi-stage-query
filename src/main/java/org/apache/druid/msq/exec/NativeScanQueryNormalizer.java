@@ -19,44 +19,39 @@
 
 package org.apache.druid.msq.exec;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.druid.client.coordinator.CoordinatorClient;
+import org.apache.druid.common.guava.FutureUtils;
 import org.apache.druid.error.DruidException;
-import org.apache.druid.java.util.common.Intervals;
-import org.apache.druid.java.util.common.guava.Sequence;
-import org.apache.druid.java.util.common.guava.Yielder;
-import org.apache.druid.java.util.common.guava.Yielders;
-import org.apache.druid.java.util.common.logger.Logger;
+import org.apache.druid.query.DataSource;
 import org.apache.druid.query.Druids;
+import org.apache.druid.query.FilteredDataSource;
+import org.apache.druid.query.FrameBasedInlineDataSource;
 import org.apache.druid.query.InlineDataSource;
-import org.apache.druid.query.QueryContexts;
-import org.apache.druid.query.metadata.metadata.AggregatorMergeStrategy;
-import org.apache.druid.query.metadata.metadata.AllColumnIncluderator;
-import org.apache.druid.query.metadata.metadata.ColumnAnalysis;
-import org.apache.druid.query.metadata.metadata.ColumnIncluderator;
-import org.apache.druid.query.metadata.metadata.ListColumnIncluderator;
-import org.apache.druid.query.metadata.metadata.SegmentAnalysis;
-import org.apache.druid.query.metadata.metadata.SegmentMetadataQuery;
+import org.apache.druid.query.JoinDataSource;
+import org.apache.druid.query.Query;
+import org.apache.druid.query.QueryDataSource;
+import org.apache.druid.query.TableDataSource;
+import org.apache.druid.query.UnionDataSource;
+import org.apache.druid.query.UnnestDataSource;
+import org.apache.druid.query.groupby.GroupByQuery;
+import org.apache.druid.query.operator.WindowOperatorQuery;
 import org.apache.druid.query.scan.ScanQuery;
-import org.apache.druid.query.spec.MultipleIntervalSegmentSpec;
+import org.apache.druid.query.timeseries.TimeseriesQuery;
+import org.apache.druid.query.topn.TopNQuery;
 import org.apache.druid.segment.VirtualColumn;
 import org.apache.druid.segment.VirtualColumns;
 import org.apache.druid.segment.column.ColumnCapabilities;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.RowSignature;
-import org.apache.druid.server.QueryLifecycle;
-import org.apache.druid.server.QueryLifecycleFactory;
-import org.apache.druid.server.security.Access;
-import org.apache.druid.server.security.AuthenticationResult;
+import org.apache.druid.segment.metadata.DataSourceInformation;
 import org.apache.druid.sql.calcite.external.ExternalDataSource;
 import org.apache.druid.sql.calcite.rel.DruidQuery;
 
-import java.io.IOException;
 import java.util.ArrayList;
-import java.util.EnumSet;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -64,43 +59,112 @@ import java.util.stream.Collectors;
  */
 public class NativeScanQueryNormalizer
 {
-  private static final Logger log = new Logger(NativeScanQueryNormalizer.class);
-
-  private final ObjectMapper jsonMapper;
-  private final QueryLifecycleFactory lifecycleFactory;
-  private final AuthenticationResult authenticationResult;
+  private final CoordinatorClient coordinatorClient;
 
   public NativeScanQueryNormalizer(
-      final ObjectMapper jsonMapper,
-      final QueryLifecycleFactory lifecycleFactory,
-      final AuthenticationResult authenticationResult
+      final CoordinatorClient coordinatorClient
   )
   {
-    this.jsonMapper = jsonMapper;
-    this.lifecycleFactory = lifecycleFactory;
-    this.authenticationResult = authenticationResult;
+    this.coordinatorClient = coordinatorClient;
   }
 
-  public ScanQuery normalize(final ScanQuery query) throws JsonProcessingException
+  public ScanQuery normalize(final ScanQuery query)
+  {
+    return normalizeCurrentScan(withNormalizedSubqueryScans(query));
+  }
+
+  private ScanQuery normalizeCurrentScan(final ScanQuery query)
   {
     ScanQuery scanQuery = query;
+    RowSignature dataSourceSignature = null;
 
     if (!hasExplicitColumns(scanQuery)) {
-      scanQuery = withAllColumns(scanQuery);
+      dataSourceSignature = getDataSourceSignature(scanQuery.getDataSource());
+      scanQuery = withAllColumns(scanQuery, dataSourceSignature);
     }
 
-    if (hasScanSignature(scanQuery)) {
+    if (hasColumnTypes(scanQuery) || hasScanSignature(scanQuery)) {
       return scanQuery;
     }
 
-    final RowSignature scanSignature = buildScanSignature(scanQuery);
+    if (dataSourceSignature == null) {
+      dataSourceSignature = getDataSourceSignature(scanQuery.getDataSource());
+    }
+
+    final RowSignature scanSignature = buildScanSignature(scanQuery, dataSourceSignature);
     return Druids.ScanQueryBuilder.copy(scanQuery)
-                                  .context(QueryContexts.override(
-                                      scanQuery.getContext(),
-                                      DruidQuery.CTX_SCAN_SIGNATURE,
-                                      jsonMapper.writeValueAsString(scanSignature)
-                                  ))
+                                  .columnTypes(scanSignature.getColumnTypes())
                                   .build();
+  }
+
+  private ScanQuery withNormalizedSubqueryScans(final ScanQuery scanQuery)
+  {
+    final DataSource dataSource = scanQuery.getDataSource();
+    final DataSource normalizedDataSource = normalizeSubqueryScansInDataSource(dataSource);
+
+    if (normalizedDataSource == dataSource) {
+      return scanQuery;
+    }
+
+    return Druids.ScanQueryBuilder.copy(scanQuery)
+                                  .dataSource(normalizedDataSource)
+                                  .build();
+  }
+
+  private DataSource normalizeSubqueryScansInDataSource(final DataSource dataSource)
+  {
+    if (dataSource instanceof QueryDataSource) {
+      return normalizeQueryDataSource((QueryDataSource) dataSource);
+    }
+
+    if (canContainQueryDataSources(dataSource)) {
+      return normalizeSubqueryScansInChildren(dataSource);
+    }
+
+    return dataSource;
+  }
+
+  private boolean canContainQueryDataSources(final DataSource dataSource)
+  {
+    return dataSource instanceof FilteredDataSource
+           || dataSource instanceof JoinDataSource
+           || dataSource instanceof UnionDataSource
+           || dataSource instanceof UnnestDataSource;
+  }
+
+  private DataSource normalizeSubqueryScansInChildren(final DataSource dataSource)
+  {
+    final List<DataSource> children = dataSource.getChildren();
+    if (children.isEmpty()) {
+      return dataSource;
+    }
+
+    final List<DataSource> normalizedChildren = new ArrayList<>(children.size());
+    boolean changed = false;
+
+    for (final DataSource child : children) {
+      final DataSource normalizedChild = normalizeSubqueryScansInDataSource(child);
+      normalizedChildren.add(normalizedChild);
+      changed |= normalizedChild != child;
+    }
+
+    return changed ? dataSource.withChildren(normalizedChildren) : dataSource;
+  }
+
+  private DataSource normalizeQueryDataSource(final QueryDataSource dataSource)
+  {
+    final Query<?> query = dataSource.getQuery();
+    if (!(query instanceof ScanQuery)) {
+      return normalizeSubqueryScansInChildren(dataSource);
+    }
+
+    final ScanQuery normalizedQuery = normalize((ScanQuery) query);
+    return normalizedQuery == query ? dataSource : new QueryDataSource(normalizedQuery);
+  }
+
+  private boolean hasColumnTypes(final ScanQuery scanQuery)
+  {
+    return scanQuery.getColumnTypes() != null;
   }
 
   private boolean hasScanSignature(final ScanQuery scanQuery)
@@ -108,25 +172,21 @@ public class NativeScanQueryNormalizer
     return scanQuery.context().get(DruidQuery.CTX_SCAN_SIGNATURE) != null;
   }
 
-  private RowSignature buildScanSignature(final ScanQuery scanQuery)
+  private RowSignature buildScanSignature(
+      final ScanQuery scanQuery,
+      final RowSignature dataSourceSignature
+  )
   {
-    final RowSignature dataSourceSignature = getDataSourceSignature(
-        scanQuery,
-        getRequiredDataSourceColumns(scanQuery, scanQuery.getColumns())
-    );
-
     final List<String> outputColumns = scanQuery.getColumns();
-    final RowSignature allKnownSignature = buildCombinedSignature(scanQuery, outputColumns, dataSourceSignature);
+    final RowSignature allKnownSignature = buildCombinedSignature(scanQuery, dataSourceSignature);
     final RowSignature.Builder outputSignatureBuilder = RowSignature.builder();
 
     for (final String column : outputColumns) {
       final ColumnType type = allKnownSignature.getColumnType(column).orElse(null);
       if (type == null) {
-        throw userScanSignatureException(
-            "Unable to auto-generate [%s] for column [%s]. Please provide [%s] in the query context.",
-            DruidQuery.CTX_SCAN_SIGNATURE,
-            column,
-            DruidQuery.CTX_SCAN_SIGNATURE
+        throw userColumnTypesException(
+            "Unable to auto-generate columnTypes for column [%s]. Please provide columnTypes in the query.",
+            column
         );
       }
 
@@ -142,9 +202,8 @@ public class NativeScanQueryNormalizer
     return columns != null && !columns.isEmpty();
   }
 
-  private ScanQuery withAllColumns(final ScanQuery scanQuery)
+  private ScanQuery withAllColumns(final ScanQuery scanQuery, final RowSignature dataSourceSignature)
   {
-    final RowSignature dataSourceSignature = getDataSourceSignature(scanQuery, null);
     return Druids.ScanQueryBuilder.copy(scanQuery)
                                   .columns(getAllColumns(scanQuery, dataSourceSignature))
                                   .build();
@@ -163,52 +222,17 @@ public class NativeScanQueryNormalizer
     return columns;
   }
 
-  private List<String> getRequiredDataSourceColumns(final ScanQuery scanQuery, final List<String> outputColumns)
-  {
-    final List<String> requiredColumns = new ArrayList<>();
-
-    for (final String column : outputColumns) {
-      addRequiredDataSourceColumns(scanQuery, column, requiredColumns);
-    }
-
-    return requiredColumns;
-  }
-
-  private void addRequiredDataSourceColumns(
-      final ScanQuery scanQuery,
-      final String column,
-      final List<String> requiredColumns
-  )
-  {
-    if (!scanQuery.getVirtualColumns().exists(column)) {
-      if (!requiredColumns.contains(column)) {
-        requiredColumns.add(column);
-      }
-      return;
-    }
-
-    final VirtualColumn virtualColumn = scanQuery.getVirtualColumns().getVirtualColumn(column);
-    if (virtualColumn == null) {
-      return;
-    }
-
-    for (final String requiredColumn : virtualColumn.requiredColumns()) {
-      addRequiredDataSourceColumns(scanQuery, requiredColumn, requiredColumns);
-    }
-  }
-
   private RowSignature buildCombinedSignature(
       final ScanQuery scanQuery,
-      final List<String> outputColumns,
       final RowSignature dataSourceSignature
   )
   {
     final VirtualColumns virtualColumns = scanQuery.getVirtualColumns();
     final RowSignature.Builder builder = RowSignature.builder().addAll(dataSourceSignature);
 
-    final List<String> pending = outputColumns.stream()
-                                              .filter(virtualColumns::exists)
-                                              .collect(Collectors.toCollection(ArrayList::new));
+    final List<String> pending = Arrays.stream(virtualColumns.getVirtualColumns())
+                                       .map(VirtualColumn::getOutputName)
+                                       .collect(Collectors.toCollection(ArrayList::new));
 
     boolean progress;
 
@@ -240,125 +264,141 @@ public class NativeScanQueryNormalizer
     return builder.build();
   }
 
-  private RowSignature getDataSourceSignature(
-      final ScanQuery scanQuery,
-      final List<String> requiredDataSourceColumns
-  )
+  private RowSignature getDataSourceSignature(final DataSource dataSource)
   {
-    if (scanQuery.getDataSource() instanceof InlineDataSource) {
-      return ((InlineDataSource) scanQuery.getDataSource()).getRowSignature();
+    if (dataSource instanceof InlineDataSource) {
+      return ((InlineDataSource) dataSource).getRowSignature();
     }
 
-    if (scanQuery.getDataSource() instanceof ExternalDataSource) {
-      return ((ExternalDataSource) scanQuery.getDataSource()).getSignature();
+    if (dataSource instanceof FrameBasedInlineDataSource) {
+      return ((FrameBasedInlineDataSource) dataSource).getRowSignature();
     }
 
-    return getDataSourceSignatureFromSegmentMetadataQuery(scanQuery, requiredDataSourceColumns);
+    if (dataSource instanceof ExternalDataSource) {
+      return ((ExternalDataSource) dataSource).getSignature();
+    }
+
+    if (dataSource instanceof FilteredDataSource) {
+      return getDataSourceSignature(((FilteredDataSource) dataSource).getBase());
+    }
+
+    if (dataSource instanceof UnnestDataSource) {
+      return getUnnestDataSourceSignature((UnnestDataSource) dataSource);
+    }
+
+    if (dataSource instanceof JoinDataSource) {
+      return getJoinDataSourceSignature((JoinDataSource) dataSource);
+    }
+
+    if (dataSource instanceof QueryDataSource) {
+      return getQueryDataSourceSignature((QueryDataSource) dataSource);
+    }
+
+    if (dataSource instanceof UnionDataSource) {
+      return getDataSourceSignature(((UnionDataSource) dataSource).getDataSources().get(0));
+    }
+
+    return getDataSourceSignatureFromCentralizedSchema(dataSource);
   }
 
-  private static DruidException userScanSignatureException(final String format, final Object... arguments)
+  private RowSignature getUnnestDataSourceSignature(final UnnestDataSource dataSource)
+  {
+    final RowSignature baseSignature = getDataSourceSignature(dataSource.getBase());
+    final VirtualColumn virtualColumn = dataSource.getVirtualColumn();
+    final ColumnCapabilities capabilities = virtualColumn.capabilities(baseSignature, virtualColumn.getOutputName());
+    return RowSignature.builder()
+                       .addAll(baseSignature)
+                       .add(
+                           virtualColumn.getOutputName(),
+                           capabilities == null ? null : capabilities.toColumnType()
+                       )
+                       .build();
+  }
+
+  private RowSignature getJoinDataSourceSignature(final JoinDataSource dataSource)
+  {
+    final RowSignature leftSignature = getDataSourceSignature(dataSource.getLeft());
+    final RowSignature rightSignature = getDataSourceSignature(dataSource.getRight());
+    final RowSignature.Builder builder = RowSignature.builder().addAll(leftSignature);
+
+    for (final String column : rightSignature.getColumnNames()) {
+      builder.add(dataSource.getRightPrefix() + column, rightSignature.getColumnType(column).orElse(null));
+    }
+
+    return builder.build();
+  }
+
+  private RowSignature getQueryDataSourceSignature(final QueryDataSource dataSource)
+  {
+    final Query<?> query = dataSource.getQuery();
+
+    if (query instanceof ScanQuery) {
+      return normalize((ScanQuery) query).getRowSignature();
+    }
+
+    if (query instanceof GroupByQuery) {
+      final GroupByQuery groupByQuery = (GroupByQuery) query;
+      return groupByQuery.getResultRowSignature(
+          groupByQuery.context().isFinalize(true) ? RowSignature.Finalization.YES : RowSignature.Finalization.NO
+      );
+    }
+
+    if (query instanceof TimeseriesQuery) {
+      final TimeseriesQuery timeseriesQuery = (TimeseriesQuery) query;
+      return timeseriesQuery.getResultSignature(
+          timeseriesQuery.context().isFinalize(true) ? RowSignature.Finalization.YES : RowSignature.Finalization.NO
+      );
+    }
+
+    if (query instanceof TopNQuery) {
+      final TopNQuery topNQuery = (TopNQuery) query;
+      return topNQuery.getResultSignature(
+          topNQuery.context().isFinalize(true) ? RowSignature.Finalization.YES : RowSignature.Finalization.NO
+      );
+    }
+
+    if (query instanceof WindowOperatorQuery) {
+      return ((WindowOperatorQuery) query).getRowSignature();
+    }
+
+    throw userColumnTypesException(
+        "Unable to auto-generate columnTypes for query datasource [%s]. Please provide columnTypes in the query.",
+        dataSource
+    );
+  }
+
+  private RowSignature getDataSourceSignatureFromCentralizedSchema(final DataSource dataSource)
+  {
+    if (!(dataSource instanceof TableDataSource)) {
+      throw userColumnTypesException(
+          "Unable to auto-generate columnTypes for datasource [%s]. Please provide columnTypes in the query.",
+          dataSource
+      );
+    }
+
+    final String dataSourceName = ((TableDataSource) dataSource).getName();
+    final List<DataSourceInformation> dataSourceInformation = FutureUtils.getUnchecked(
+        coordinatorClient.fetchDataSourceInformation(Collections.singleton(dataSourceName)),
+        true
+    );
+
+    for (final DataSourceInformation information : dataSourceInformation) {
+      if (dataSourceName.equals(information.getDataSource()) && information.getRowSignature() != null) {
+        return information.getRowSignature();
+      }
+    }
+
+    throw userColumnTypesException(
+        "Unable to auto-generate columnTypes because datasource [%s] centralized schema is not available. "
+        + "Please provide columnTypes in the query.",
+        dataSourceName
+    );
+  }
+
+  private static DruidException userColumnTypesException(final String format, final Object... arguments)
   {
     return DruidException.forPersona(DruidException.Persona.USER)
                          .ofCategory(DruidException.Category.INVALID_INPUT)
                          .build(format, arguments);
-  }
-
-  private RowSignature getDataSourceSignatureFromSegmentMetadataQuery(
-      final ScanQuery scanQuery,
-      final List<String> requiredDataSourceColumns
-  )
-  {
-    final ColumnIncluderator columnsToInclude = requiredDataSourceColumns == null
-                                                ? new AllColumnIncluderator()
-                                                : new ListColumnIncluderator(requiredDataSourceColumns);
-    final SegmentMetadataQuery segmentMetadataQuery = new SegmentMetadataQuery(
-        scanQuery.getDataSource(),
-        scanQuery.getQuerySegmentSpec(),
-        columnsToInclude,
-        true,
-        QueryContexts.override(
-            scanQuery.getContext(),
-            QueryContexts.BROKER_PARALLEL_MERGE_KEY,
-            false
-        ),
-        EnumSet.noneOf(SegmentMetadataQuery.AnalysisType.class),
-        false,
-        null,
-        AggregatorMergeStrategy.LENIENT
-    );
-
-    final RowSignature intervalSignature = runSegmentMetadataQuery(segmentMetadataQuery);
-
-    if (intervalSignature != null) {
-      return intervalSignature;
-    }
-
-    if (!Intervals.ONLY_ETERNITY.equals(segmentMetadataQuery.getIntervals())) {
-      final SegmentMetadataQuery fallbackSegmentMetadataQuery =
-          (SegmentMetadataQuery) segmentMetadataQuery.withQuerySegmentSpec(
-              new MultipleIntervalSegmentSpec(Intervals.ONLY_ETERNITY)
-          );
-      final RowSignature fallbackSignature = runSegmentMetadataQuery(fallbackSegmentMetadataQuery);
-
-      if (fallbackSignature != null) {
-        return fallbackSignature;
-      }
-    }
-
-    throw userScanSignatureException(
-        "Unable to auto-generate [%s] because segment metadata query returned no results. "
-        + "Please provide [%s] in the query context.",
-        DruidQuery.CTX_SCAN_SIGNATURE,
-        DruidQuery.CTX_SCAN_SIGNATURE
-    );
-  }
-
-  private RowSignature runSegmentMetadataQuery(final SegmentMetadataQuery segmentMetadataQuery)
-  {
-    final QueryLifecycle lifecycle = lifecycleFactory.factorize();
-    final Sequence<SegmentAnalysis> sequence =
-        lifecycle.runSimple(segmentMetadataQuery, authenticationResult, Access.OK).getResults();
-    Yielder<SegmentAnalysis> yielder = Yielders.each(sequence);
-
-    try {
-      if (yielder.isDone()) {
-        return null;
-      }
-
-      return segmentAnalysisToRowSignature(yielder.get());
-    }
-    finally {
-      try {
-        yielder.close();
-      }
-      catch (IOException e) {
-        log.warn(e, "Unable to close segment metadata query results.");
-      }
-    }
-  }
-
-  public static RowSignature segmentAnalysisToRowSignature(final SegmentAnalysis analysis)
-  {
-    final RowSignature.Builder signatureBuilder = RowSignature.builder();
-
-    for (final Map.Entry<String, ColumnAnalysis> entry : analysis.getColumns().entrySet()) {
-      if (entry.getValue().isError()) {
-        log.warn(
-            "Scan signature generation hit a segment metadata analysis error for column [%s], selected type [%s]."
-            + " If this type is incorrect, provide [%s] manually in the query context. Error: %s",
-            entry.getKey(),
-            entry.getValue().getTypeSignature(),
-            DruidQuery.CTX_SCAN_SIGNATURE,
-            entry.getValue().getErrorMessage()
-        );
-      }
-
-      final ColumnType valueType = entry.getValue().getTypeSignature();
-      if (valueType != null) {
-        signatureBuilder.add(entry.getKey(), valueType);
-      }
-    }
-
-    return signatureBuilder.build();
   }
 }

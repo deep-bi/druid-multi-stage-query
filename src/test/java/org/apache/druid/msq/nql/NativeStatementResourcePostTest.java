@@ -35,7 +35,6 @@ import org.apache.druid.msq.sql.resources.SqlStatementResourceTest;
 import org.apache.druid.msq.test.MSQTestOverlordServiceClient;
 import org.apache.druid.query.scan.ScanQuery;
 import org.apache.druid.segment.column.ColumnType;
-import org.apache.druid.segment.column.RowSignature;
 import org.apache.druid.server.mocks.MockHttpServletRequest;
 import org.apache.druid.server.security.AuthConfig;
 import org.apache.druid.server.security.AuthenticationResult;
@@ -75,13 +74,12 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                   + "      \"cnt\",\n"
                                                   + "      \"dim1\"\n"
                                                   + "    ],\n"
+                                                  + "    \"columnTypes\": [\"LONG\", \"STRING\"],\n"
                                                   + "    \"context\":\n"
                                                   + "      {\n"
                                                   + "        \"__user\": \"allowAll\",\n"
                                                   + "        \"executionMode\": \"ASYNC\",\n"
-                                                  + "        \"maxNumTasks\": 2,\n"
-                                                  + "        \"scanSignature\": \"[{\\\"name\\\":\\\"cnt\\\",\\\"type\\\":\\\"LONG\\\"},"
-                                                  + "{\\\"name\\\":\\\"dim1\\\",\\\"type\\\":\\\"STRING\\\"}]\"\n"
+                                                  + "        \"maxNumTasks\": 2\n"
                                                   + "      }\n"
                                                   + "}";
   private static final String SIMPLE_GROUP_BY_QUERY = "{\n"
@@ -161,14 +159,13 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                                + "      \"cnt\",\n"
                                                                + "      \"dim1\"\n"
                                                                + "    ],\n"
+                                                               + "    \"columnTypes\": [\"LONG\", \"STRING\"],\n"
                                                                + "    \"context\":\n"
                                                                + "      {\n"
                                                                + "        \"__user\": \"allowAll\",\n"
                                                                + "        \"executionMode\": \"ASYNC\",\n"
                                                                + "        \"maxNumTasks\": 2,\n"
-                                                               + "        \"selectDestination\": \"durableStorage\",\n"
-                                                               + "        \"scanSignature\": \"[{\\\"name\\\":\\\"cnt\\\",\\\"type\\\":\\\"LONG\\\"},"
-                                                               + "{\\\"name\\\":\\\"dim1\\\",\\\"type\\\":\\\"STRING\\\"}]\"\n"
+                                                               + "        \"selectDestination\": \"durableStorage\"\n"
                                                                + "      }\n"
                                                                + "}";
   private static final String SIMPLE_SCAN_QUERY_WITH_DURABLE_AND_RPP = "{\n"
@@ -183,15 +180,14 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                                        + "      \"cnt\",\n"
                                                                        + "      \"dim1\"\n"
                                                                        + "    ],\n"
+                                                                       + "    \"columnTypes\": [\"LONG\", \"STRING\"],\n"
                                                                        + "    \"context\":\n"
                                                                        + "      {\n"
                                                                        + "        \"__user\": \"allowAll\",\n"
                                                                        + "        \"executionMode\": \"ASYNC\",\n"
                                                                        + "        \"maxNumTasks\": 2,\n"
                                                                        + "        \"selectDestination\": \"durableStorage\",\n"
-                                                                       + "        \"rowsPerPage\": 2,\n"
-                                                                       + "        \"scanSignature\": \"[{\\\"name\\\":\\\"cnt\\\",\\\"type\\\":\\\"LONG\\\"},"
-                                                                       + "{\\\"name\\\":\\\"dim1\\\",\\\"type\\\":\\\"STRING\\\"}]\"\n"
+                                                                       + "        \"rowsPerPage\": 2\n"
                                                                        + "      }\n"
                                                                        + "}";
 
@@ -252,10 +248,10 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                            + "    \"v0\",\n"
                                                            + "    \"user\"\n"
                                                            + "  ],\n"
+                                                           + "  \"columnTypes\": [\"LONG\", \"STRING\"],\n"
                                                            + "  \"context\": {\n"
                                                            + "    \"executionMode\": \"async\",\n"
                                                            + "    \"__user\": \"allowAll\",\n"
-                                                           + "    \"scanSignature\": \"[{\\\"name\\\":\\\"v0\\\",\\\"type\\\":\\\"LONG\\\"},{\\\"name\\\":\\\"user\\\",\\\"type\\\":\\\"STRING\\\"}]\",\n"
                                                            + "    \"selectDestination\": \"durableStorage\",\n"
                                                            + "    \"rowsPerPage\": 2,\n"
                                                            + "    \"maxNumTasks\": 3\n"
@@ -288,6 +284,12 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
                                                                                ColumnType.LONG, "count",
                                                                                ColumnType.LONG
   );
+  private static final Map<String, ColumnType> SCAN_ROW_SIGNATURE = ImmutableMap.of(
+      "cnt",
+      ColumnType.LONG,
+      "dim1",
+      ColumnType.STRING
+  );
   private static final String CONTENT_TYPE_JSON = "application/json";
   private static final AuthenticationResult AUTHENTICATION_RESULT =
       new AuthenticationResult("allowAll", "allowAll", null, null);
@@ -301,6 +303,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
         objectMapper,
         smileMapper,
         indexingNativeServiceClient,
+        createCoordinatorClient(),
         createLifecycleFactory(),
         authorizerMapper,
         localFileStorageConnector
@@ -328,15 +331,9 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
     final String taskId = assertScanQueryReturnsExpected(SIMPLE_SCAN_QUERY_WITH_EMPTY_COLUMNS);
     final ScanQuery submittedQuery = readSubmittedScanQuery(taskId);
 
-    final RowSignature expectedScanSignature = RowSignature.builder()
-                                                           .add("cnt", ColumnType.LONG)
-                                                           .add("dim1", ColumnType.STRING)
-                                                           .build();
     Assertions.assertEquals(ImmutableList.of("cnt", "dim1"), submittedQuery.getColumns());
-    Assertions.assertEquals(
-        expectedScanSignature,
-        objectMapper.readValue(submittedQuery.context().getString(DruidQuery.CTX_SCAN_SIGNATURE), RowSignature.class)
-    );
+    Assertions.assertEquals(ImmutableList.of(ColumnType.LONG, ColumnType.STRING), submittedQuery.getColumnTypes());
+    Assertions.assertNull(submittedQuery.context().get(DruidQuery.CTX_SCAN_SIGNATURE));
   }
 
   @Test
@@ -382,6 +379,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
         objectMapper,
         smileMapper,
         indexingNativeServiceClient,
+        createCoordinatorClient(),
         createLifecycleFactory(),
         authorizerMapper,
         NilStorageConnector.getInstance()
@@ -628,7 +626,7 @@ public class NativeStatementResourcePostTest extends NativeMSQTestBase
 
     NativeStatementResult expected = new NativeStatementResult(taskId, StatementState.SUCCESS,
                                                                MSQTestOverlordServiceClient.CREATED_TIME,
-                                                               ImmutableMap.of(),
+                                                               SCAN_ROW_SIGNATURE,
                                                                MSQTestOverlordServiceClient.DURATION,
                                                                new ResultSetInformation(
                                                                    6L,
