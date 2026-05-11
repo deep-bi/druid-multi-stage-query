@@ -20,7 +20,6 @@
 package org.apache.druid.msq.nql.resources;
 
 import com.fasterxml.jackson.core.JsonParseException;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.joda.ser.DateTimeSerializer;
@@ -409,9 +408,10 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
     return toolChest.resultArraySignature(query);
   }
 
-  private ScanQuery normalizeScanQuery(final ScanQuery query) throws JsonProcessingException
+  private ScanQuery normalizeScanQuery(final ScanQuery query)
   {
     return new NativeScanQueryNormalizer(
+        jsonMapper,
         coordinatorClient
     ).normalize(query);
   }

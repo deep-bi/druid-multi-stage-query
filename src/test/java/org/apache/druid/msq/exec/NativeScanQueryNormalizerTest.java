@@ -231,6 +231,69 @@ public class NativeScanQueryNormalizerTest
   }
 
   @Test
+  public void testQueryDataSourceUsesSubqueryScanSignatureFallback() throws Exception
+  {
+    final NativeScanQueryNormalizer normalizer = createNormalizer(dataSourceSignature());
+    final RowSignature innerSignature = RowSignature.builder()
+                                                    .add("dim1", ColumnType.STRING)
+                                                    .build();
+    final ScanQuery innerQuery = Druids.newScanQueryBuilder()
+                                       .dataSource("foo")
+                                       .intervals(intervals("2000/2001"))
+                                       .columns("dim1")
+                                       .context(ImmutableMap.of(
+                                           DruidQuery.CTX_SCAN_SIGNATURE,
+                                           JSON_MAPPER.writeValueAsString(innerSignature)
+                                       ))
+                                       .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
+                                       .build();
+
+    final ScanQuery query = Druids.newScanQueryBuilder()
+                                  .dataSource(new QueryDataSource(innerQuery))
+                                  .intervals(intervals("2000/2001"))
+                                  .columns("dim1")
+                                  .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
+                                  .build();
+
+    final ScanQuery normalizedQuery = normalizer.normalize(query);
+
+    Assert.assertEquals(ImmutableList.of("dim1"), normalizedQuery.getColumns());
+    Assert.assertEquals(ImmutableList.of(ColumnType.STRING), normalizedQuery.getColumnTypes());
+  }
+
+  @Test
+  public void testQueryDataSourceUsesSubqueryScanSignatureWhenBothSignatureFieldsExist() throws Exception
+  {
+    final NativeScanQueryNormalizer normalizer = createNormalizer(dataSourceSignature());
+    final RowSignature deprecatedInnerSignature = RowSignature.builder()
+                                                             .add("dim1", ColumnType.STRING)
+                                                             .build();
+    final ScanQuery innerQuery = Druids.newScanQueryBuilder()
+                                       .dataSource("foo")
+                                       .intervals(intervals("2000/2001"))
+                                       .columns("dim1")
+                                       .columnTypes(ColumnType.LONG)
+                                       .context(ImmutableMap.of(
+                                           DruidQuery.CTX_SCAN_SIGNATURE,
+                                           JSON_MAPPER.writeValueAsString(deprecatedInnerSignature)
+                                       ))
+                                       .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
+                                       .build();
+
+    final ScanQuery query = Druids.newScanQueryBuilder()
+                                  .dataSource(new QueryDataSource(innerQuery))
+                                  .intervals(intervals("2000/2001"))
+                                  .columns("dim1")
+                                  .resultFormat(ScanQuery.ResultFormat.RESULT_FORMAT_COMPACTED_LIST)
+                                  .build();
+
+    final ScanQuery normalizedQuery = normalizer.normalize(query);
+
+    Assert.assertEquals(ImmutableList.of("dim1"), normalizedQuery.getColumns());
+    Assert.assertEquals(ImmutableList.of(ColumnType.STRING), normalizedQuery.getColumnTypes());
+  }
+
+  @Test
   public void testJoinDataSourceNormalizesQueryDataSourceChildren() throws Exception
   {
     final NativeScanQueryNormalizer normalizer = createNormalizer(ImmutableMap.of(
@@ -289,7 +352,7 @@ public class NativeScanQueryNormalizerTest
 
   private static NativeScanQueryNormalizer createNormalizer(final Map<String, RowSignature> dataSourceSignatures)
   {
-    return new NativeScanQueryNormalizer(createCoordinatorClient(dataSourceSignatures));
+    return new NativeScanQueryNormalizer(JSON_MAPPER, createCoordinatorClient(dataSourceSignatures));
   }
 
   private static MultipleIntervalSegmentSpec intervals(final String interval)

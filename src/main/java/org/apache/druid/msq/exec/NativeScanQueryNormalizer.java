@@ -19,9 +19,11 @@
 
 package org.apache.druid.msq.exec;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.druid.client.coordinator.CoordinatorClient;
 import org.apache.druid.common.guava.FutureUtils;
 import org.apache.druid.error.DruidException;
+import org.apache.druid.msq.querykit.scan.ScanQueryKit;
 import org.apache.druid.query.DataSource;
 import org.apache.druid.query.Druids;
 import org.apache.druid.query.FilteredDataSource;
@@ -59,12 +61,15 @@ import java.util.stream.Collectors;
  */
 public class NativeScanQueryNormalizer
 {
+  private final ObjectMapper jsonMapper;
   private final CoordinatorClient coordinatorClient;
 
   public NativeScanQueryNormalizer(
+      final ObjectMapper jsonMapper,
       final CoordinatorClient coordinatorClient
   )
   {
+    this.jsonMapper = jsonMapper;
     this.coordinatorClient = coordinatorClient;
   }
 
@@ -333,7 +338,7 @@ public class NativeScanQueryNormalizer
     final Query<?> query = dataSource.getQuery();
 
     if (query instanceof ScanQuery) {
-      return normalize((ScanQuery) query).getRowSignature();
+      return ScanQueryKit.getAndValidateSignature(normalize((ScanQuery) query), jsonMapper);
     }
 
     if (query instanceof GroupByQuery) {
