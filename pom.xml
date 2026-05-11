@@ -26,7 +26,7 @@
   <groupId>org.apache.druid.extensions</groupId>
   <artifactId>druid-multi-stage-query</artifactId>
   <name>druid-multi-stage-query</name>
-  <version>29.0.1-deepbi2</version>
+  <version>29.0.1-deepbi3</version>
   <description>druid-multi-stage-query</description>
 
   <properties>
