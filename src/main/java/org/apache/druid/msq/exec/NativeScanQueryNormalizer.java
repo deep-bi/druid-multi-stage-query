@@ -382,10 +382,21 @@ public class NativeScanQueryNormalizer
     }
 
     final String dataSourceName = ((TableDataSource) dataSource).getName();
-    final List<DataSourceInformation> dataSourceInformation = FutureUtils.getUnchecked(
-        coordinatorClient.fetchDataSourceInformation(Collections.singleton(dataSourceName)),
-        true
-    );
+    final List<DataSourceInformation> dataSourceInformation;
+    try {
+      dataSourceInformation = FutureUtils.getUnchecked(
+          coordinatorClient.fetchDataSourceInformation(Collections.singleton(dataSourceName)),
+          true
+      );
+    }
+    catch (Exception e) {
+      throw userColumnTypesException(
+          e,
+          "Unable to auto-generate columnTypes because datasource [%s] centralized schema could not be fetched. "
+          + "Please provide columnTypes in the query.",
+          dataSourceName
+      );
+    }
 
     for (final DataSourceInformation information : dataSourceInformation) {
       if (dataSourceName.equals(information.getDataSource()) && information.getRowSignature() != null) {
@@ -405,5 +416,16 @@ public class NativeScanQueryNormalizer
     return DruidException.forPersona(DruidException.Persona.USER)
                          .ofCategory(DruidException.Category.INVALID_INPUT)
                          .build(format, arguments);
+  }
+
+  private static DruidException userColumnTypesException(
+      final Throwable cause,
+      final String format,
+      final Object... arguments
+  )
+  {
+    return DruidException.forPersona(DruidException.Persona.USER)
+                         .ofCategory(DruidException.Category.INVALID_INPUT)
+                         .build(cause, format, arguments);
   }
 }
