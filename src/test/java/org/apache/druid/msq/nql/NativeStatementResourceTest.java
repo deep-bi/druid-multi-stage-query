@@ -83,7 +83,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.Supplier;
 
 import static org.apache.druid.msq.sql.resources.SqlStatementResourceTest.ACCEPTED_SELECT_MSQ_QUERY;
 import static org.apache.druid.msq.sql.resources.SqlStatementResourceTest.CREATED_TIME;
@@ -103,7 +102,6 @@ import static org.apache.druid.msq.test.MSQTestOverlordServiceClient.QUEUE_INSER
 public class NativeStatementResourceTest extends NativeMSQTestBase
 {
 
-
   private static final String SIMPLE_SCAN_QUERY = "{\n"
                                                   + "    \"queryType\": \"scan\",\n"
                                                   + "    \"dataSource\": \"target\",\n"
@@ -118,13 +116,12 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
                                                   + "      \"alias\",\n"
                                                   + "      \"market\"\n"
                                                   + "    ],\n"
+                                                  + "    \"columnTypes\": [\"LONG\", \"STRING\", \"STRING\"],\n"
                                                   + "    \"context\":\n"
                                                   + "      {\n"
                                                   + "        \"__user\": \"allowAll\",\n"
                                                   + "        \"executionMode\": \"ASYNC\",\n"
-                                                  + "        \"maxNumTasks\": 2,\n"
-                                                  + "        \"scanSignature\": \"[{\\\"name\\\":\\\"__time\\\",\\\"type\\\":\\\"LONG\\\"},"
-                                                  + "{\\\"name\\\":\\\"alias\\\",\\\"type\\\":\\\"STRING\\\"}, {\\\"name\\\":\\\"market\\\",\\\"type\\\":\\\"STRING\\\"}]\"\n"
+                                                  + "        \"maxNumTasks\": 2\n"
                                                   + "      }\n"
                                                   + "}";
   private static final RowSignature ROW_SIGNATURE = RowSignature.builder()
@@ -141,71 +138,6 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
                                                                     ColumnType.STRING
                                                                 )
                                                                 .build();
-  private final Supplier<MSQTaskReport> selectTaskReport = () -> new MSQTaskReport(
-      FINISHED_SELECT_MSQ_QUERY,
-      new MSQTaskReportPayload(
-          new MSQStatusReport(
-              TaskState.SUCCESS,
-              null,
-              new ArrayDeque<>(),
-              null,
-              0,
-              new HashMap<>(),
-              1,
-              2,
-              null,
-              null
-          ),
-          MSQStagesReport.create(
-              MSQTaskReportTest.QUERY_DEFINITION,
-              ImmutableMap.of(),
-              ImmutableMap.of(),
-              ImmutableMap.of(0, 1),
-              ImmutableMap.of(0, 1),
-              ImmutableMap.of()
-          ),
-          CounterSnapshotsTree.fromMap(ImmutableMap.of(
-              0,
-              ImmutableMap.of(
-                  0,
-                  new CounterSnapshots(ImmutableMap.of(
-                      "output",
-                      new ChannelCounters.Snapshot(
-                          new long[]{1L, 2L},
-                          new long[]{3L, 5L},
-                          new long[]{},
-                          new long[]{},
-                          new long[]{}
-                      )
-                  )
-                  )
-              )
-          )),
-          new MSQResultsReport(
-              ImmutableList.of(
-                  new MSQResultsReport.ColumnAndType(
-                      "__time",
-                      ColumnType.LONG
-                  ),
-                  new MSQResultsReport.ColumnAndType(
-                      "alias",
-                      ColumnType.STRING
-                  ),
-                  new MSQResultsReport.ColumnAndType(
-                      "market",
-                      ColumnType.STRING
-                  )
-              ),
-              ImmutableList.of(
-                  SqlTypeName.TIMESTAMP,
-                  SqlTypeName.VARCHAR,
-                  SqlTypeName.VARCHAR
-              ),
-              RESULT_ROWS,
-              null
-          )
-      )
-  );
   private final AuthorizerMapper authorizerMapper = new AuthorizerMapper(null)
   {
     @Override
@@ -254,6 +186,76 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
     return rowSignature;
   }
 
+  private static MSQTaskReport selectTaskReport(final String queryId)
+  {
+    return new MSQTaskReport(
+        queryId,
+        new MSQTaskReportPayload(
+            new MSQStatusReport(
+                TaskState.SUCCESS,
+                null,
+                new ArrayDeque<>(),
+                null,
+                0,
+                new HashMap<>(),
+                1,
+                2,
+                null,
+                null
+            ),
+            MSQStagesReport.create(
+                MSQTaskReportTest.QUERY_DEFINITION,
+                ImmutableMap.of(),
+                ImmutableMap.of(),
+                ImmutableMap.of(0, 1),
+                ImmutableMap.of(0, 1),
+                ImmutableMap.of()
+
+            ),
+            CounterSnapshotsTree.fromMap(ImmutableMap.of(
+                0,
+                ImmutableMap.of(
+                    0,
+                    new CounterSnapshots(ImmutableMap.of(
+                        "output",
+                        new ChannelCounters.Snapshot(
+                            new long[]{1L, 2L},
+                            new long[]{3L, 5L},
+                            new long[]{},
+                            new long[]{},
+                            new long[]{}
+                        )
+                    )
+                    )
+                )
+            )),
+            new MSQResultsReport(
+                ImmutableList.of(
+                    new MSQResultsReport.ColumnAndType(
+                        "__time",
+                        ColumnType.LONG
+                    ),
+                    new MSQResultsReport.ColumnAndType(
+                        "alias",
+                        ColumnType.STRING
+                    ),
+                    new MSQResultsReport.ColumnAndType(
+                        "market",
+                        ColumnType.STRING
+                    )
+                ),
+                ImmutableList.of(
+                    SqlTypeName.TIMESTAMP,
+                    SqlTypeName.VARCHAR,
+                    SqlTypeName.VARCHAR
+                ),
+                RESULT_ROWS,
+                null
+            )
+        )
+    );
+  }
+
   private static MockHttpServletRequest makeExpectedReq(AuthenticationResult authenticationResult)
   {
     MockHttpServletRequest req = new MockHttpServletRequest();
@@ -274,10 +276,16 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
 
   public MSQNativeControllerTask getMSQSelectPayload() throws JsonProcessingException
   {
+    return getMSQSelectPayload(ACCEPTED_SELECT_MSQ_QUERY, SIMPLE_SCAN_QUERY);
+  }
+
+  public MSQNativeControllerTask getMSQSelectPayload(final String queryId, final String queryJson)
+      throws JsonProcessingException
+  {
     return new MSQNativeControllerTask(
-        ACCEPTED_SELECT_MSQ_QUERY,
+        queryId,
         MSQSpec.builder()
-               .query(objectMapper.readValue(SIMPLE_SCAN_QUERY, Query.class))
+               .query(objectMapper.readValue(queryJson, Query.class))
                .columnMappings(
                    ColumnMappings.identity(ROW_SIGNATURE))
                .destination(TaskReportMSQDestination.instance())
@@ -298,6 +306,7 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
         objectMapper,
         smileMapper,
         overlordClient,
+        createCoordinatorClient(),
         createLifecycleFactory(),
         authorizerMapper,
         new LocalFileStorageConnector(newTempFolder("local"))
@@ -366,12 +375,12 @@ public class NativeStatementResourceTest extends NativeMSQTestBase
     Mockito.when(indexingServiceClient.taskPayload(FINISHED_SELECT_MSQ_QUERY))
            .thenReturn(Futures.immediateFuture(new TaskPayloadResponse(
                FINISHED_SELECT_MSQ_QUERY,
-               getMSQSelectPayload()
+               getMSQSelectPayload(FINISHED_SELECT_MSQ_QUERY, SIMPLE_SCAN_QUERY)
            )));
 
 
     Mockito.when(indexingServiceClient.taskReportAsMap(FINISHED_SELECT_MSQ_QUERY))
-           .thenAnswer(inv -> Futures.immediateFuture(TaskReport.buildTaskReports(selectTaskReport.get())));
+           .thenAnswer(inv -> Futures.immediateFuture(TaskReport.buildTaskReports(selectTaskReport(FINISHED_SELECT_MSQ_QUERY))));
 
     Mockito.when(indexingServiceClient.taskStatus(ArgumentMatchers.eq(ERRORED_SELECT_MSQ_QUERY)))
            .thenReturn(Futures.immediateFuture(new TaskStatusResponse(ERRORED_SELECT_MSQ_QUERY, new TaskStatusPlus(

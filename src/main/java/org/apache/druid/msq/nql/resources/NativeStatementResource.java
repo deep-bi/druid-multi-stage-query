@@ -27,6 +27,7 @@ import com.fasterxml.jackson.jaxrs.smile.SmileMediaTypes;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.io.CountingOutputStream;
 import com.google.inject.Inject;
+import org.apache.druid.client.coordinator.CoordinatorClient;
 import org.apache.druid.client.indexing.TaskPayloadResponse;
 import org.apache.druid.client.indexing.TaskStatusResponse;
 import org.apache.druid.error.DruidException;
@@ -42,6 +43,7 @@ import org.apache.druid.java.util.common.guava.Yielder;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.msq.AbstractStatementResource;
+import org.apache.druid.msq.exec.NativeScanQueryNormalizer;
 import org.apache.druid.msq.guice.MultiStageQuery;
 import org.apache.druid.msq.indexing.MSQNativeControllerTask;
 import org.apache.druid.msq.indexing.MSQSpec;
@@ -112,6 +114,7 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
   protected final ObjectMapper smileMapper;
   private final QueryLifecycleFactory lifecycleFactory;
   private final AuthorizerMapper authorizerMapper;
+  private final CoordinatorClient coordinatorClient;
 
 
   @Inject
@@ -119,6 +122,7 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
       @Json final ObjectMapper jsonMapper,
       @Smile final ObjectMapper smileMapper,
       final OverlordClient overlordClient,
+      final CoordinatorClient coordinatorClient,
       final QueryLifecycleFactory lifecycleFactory,
       final AuthorizerMapper authorizerMapper,
       final @MultiStageQuery StorageConnector storageConnector
@@ -129,6 +133,7 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
     this.objectMapper = serializeDataTimeAsLong(jsonMapper);
     this.smileMapper = serializeDataTimeAsLong(smileMapper);
     this.authorizerMapper = authorizerMapper;
+    this.coordinatorClient = coordinatorClient;
   }
 
   private static String getPreviousEtag(final HttpServletRequest req)
@@ -194,7 +199,11 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
 
       contextChecks(context);
 
-      RowSignature signature = getRowSignature(query);
+      final Query<?> queryToRun = query instanceof ScanQuery
+                                  ? normalizeScanQuery((ScanQuery) query)
+                                  : query;
+
+      final RowSignature signature = getRowSignature(queryToRun);
       MSQNativeTaskQueryMaker taskQueryMaker = new MSQNativeTaskQueryMaker(
           null,
           overlordClient,
@@ -203,7 +212,7 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
           signature
       );
 
-      QueryResponse<Object[]> response = taskQueryMaker.runNativeQuery(query);
+      QueryResponse<Object[]> response = taskQueryMaker.runNativeQuery(queryToRun);
       final Sequence<Object[]> sequence = response.getResults();
 
       return buildTaskResponse(sequence, authenticationResult);
@@ -397,6 +406,14 @@ public class NativeStatementResource extends AbstractStatementResource<NativeSta
     lifecycle.initialize(query);
     QueryToolChest<?, Query<?>> toolChest = lifecycle.getToolChest();
     return toolChest.resultArraySignature(query);
+  }
+
+  private ScanQuery normalizeScanQuery(final ScanQuery query)
+  {
+    return new NativeScanQueryNormalizer(
+        jsonMapper,
+        coordinatorClient
+    ).normalize(query);
   }
 
   private ColumnMappings getColumnMappings(final RowSignature signature)
